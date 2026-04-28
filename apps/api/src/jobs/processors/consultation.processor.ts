@@ -5,12 +5,16 @@ import { DB } from '../../db/db.module';
 import { consultations, timelineEvents } from '../../db/schema';
 import { and, eq } from 'drizzle-orm';
 import { AiService } from '../../ai/ai.service';
+import { S3GetService } from '../../uploads/s3.get.service';
+import { DeepgramService } from '../../stt/deepgram.service';
 
 @Processor('consultation')
 export class ConsultationProcessor extends WorkerHost {
   constructor(
     @Inject(DB) private readonly dbConn: { db: any; pool: any },
     private readonly ai: AiService,
+    private readonly s3get: S3GetService,
+    private readonly deepgram: DeepgramService,
   ) {
     super();
   }
@@ -26,16 +30,26 @@ export class ConsultationProcessor extends WorkerHost {
     const c = rows[0];
     if (!c) return;
 
-    // Placeholder transcript + note generation until STT is wired
-    const transcript = c.transcript ?? {
-      language: 'en',
-      segments: [],
-      note: 'STT not wired yet; transcript empty',
+    if (!c.audioObjectKey) {
+      throw new Error('Missing audioObjectKey for consultation');
+    }
+
+    const audio = await this.s3get.getObjectBuffer(c.audioObjectKey);
+    const transcriptResult = await this.deepgram.transcribe({
+      audioBuffer: audio.buffer,
+      mimetype: audio.contentType ?? 'application/octet-stream',
+      language: (c.transcript as any)?.language ?? 'en',
+    });
+
+    const transcript = {
+      language: transcriptResult.language,
+      segments: transcriptResult.segments,
+      text: transcriptResult.text,
     };
 
     const note = await this.ai.generateSoapNote({
-      transcriptText: this.ai.flattenTranscript(transcript),
-      language: transcript.language ?? 'en',
+      transcriptText: transcriptResult.text,
+      language: transcriptResult.language ?? 'en',
     });
 
     await this.dbConn.db

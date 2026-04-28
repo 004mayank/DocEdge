@@ -4,6 +4,8 @@ import { loadEnv } from '../config/env';
 import { JobsService } from './jobs.service';
 import { ConsultationProcessor } from './processors/consultation.processor';
 import { AiModule } from '../ai/ai.module';
+import { UploadsModule } from '../uploads/uploads.module';
+import { SttModule } from '../stt/stt.module';
 
 @Module({
   imports: [
@@ -14,6 +16,8 @@ import { AiModule } from '../ai/ai.module';
       name: 'consultation',
     }),
     AiModule,
+    UploadsModule,
+    SttModule,
   ],
   providers: [JobsService, ConsultationProcessor],
   exports: [JobsService],
