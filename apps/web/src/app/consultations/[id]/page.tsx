@@ -95,10 +95,25 @@ export default function ConsultationDetailPage({ params }: { params: { id: strin
       </section>
 
       <section className="mt-6 border rounded-xl p-4">
-        <h2 className="font-semibold">Transcript (raw)</h2>
-        <pre className="mt-3 text-xs overflow-auto bg-gray-50 p-3 rounded">
-          {JSON.stringify(c?.transcript ?? null, null, 2)}
-        </pre>
+        <h2 className="font-semibold">Transcript</h2>
+        <div className="mt-3 text-sm text-gray-800 whitespace-pre-wrap">
+          {(() => {
+            const t = c?.transcript;
+            if (!t) return 'No transcript yet.';
+            if (typeof t.text === 'string' && t.text.trim().length) return t.text;
+            const segs = Array.isArray(t.segments) ? t.segments : [];
+            if (!segs.length) return 'Transcript empty.';
+            return segs
+              .map((s: any) => {
+                const t0 = typeof s.t0 === 'number' ? s.t0.toFixed(1) : '';
+                const t1 = typeof s.t1 === 'number' ? s.t1.toFixed(1) : '';
+                const sp = s.speaker ? String(s.speaker) : 'speaker';
+                const time = t0 && t1 ? `[${t0}s-${t1}s] ` : '';
+                return `${time}${sp}: ${s.text ?? ''}`;
+              })
+              .join('\n\n');
+          })()}
+        </div>
       </section>
 
       <section className="mt-6 border rounded-xl p-4">
