@@ -65,6 +65,11 @@ export default function Home() {
         <h2 className="font-semibold">Patients</h2>
         <p className="text-sm text-gray-600">Temporary list (only newly created in this session)</p>
         <div className="mt-3 text-xs text-gray-500">Token loaded: {token ? 'yes' : 'no'}</div>
+        <div className="mt-3">
+          <a className="underline text-sm" href="/patients">
+            View all patients →
+          </a>
+        </div>
         <ul className="mt-4 space-y-2">
           {patients.map((p) => (
             <li key={p.id} className="border rounded p-3">

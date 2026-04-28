@@ -34,6 +34,11 @@ export class PatientsController {
     return this.patients.create(req.user, dto);
   }
 
+  @Get()
+  async list(@Req() req: any) {
+    return this.patients.list(req.user);
+  }
+
   @Get(':id')
   async get(@Param('id') id: string, @Req() req: any) {
     return this.patients.get(req.user, id);

@@ -34,6 +34,14 @@ export class PatientsService {
     return created[0];
   }
 
+  async list(user: AuthUser) {
+    const rows = await this.dbConn.db
+      .select()
+      .from(patients)
+      .where(eq(patients.clinicId, user.clinicId));
+    return { items: rows };
+  }
+
   async get(user: AuthUser, id: string) {
     const found = await this.dbConn.db
       .select()
