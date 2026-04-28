@@ -30,8 +30,10 @@ export default function PatientsPage() {
       <ul className="mt-6 space-y-2">
         {items.map((p) => (
           <li key={p.id} className="border rounded p-3">
-            <div className="font-medium">{p.fullName}</div>
-            <div className="text-sm text-gray-600">{p.id}</div>
+            <a className="block" href={`/patients/${p.id}`}>
+              <div className="font-medium">{p.fullName}</div>
+              <div className="text-sm text-gray-600">{p.id}</div>
+            </a>
           </li>
         ))}
       </ul>
