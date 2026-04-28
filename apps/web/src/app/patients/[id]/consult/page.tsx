@@ -32,7 +32,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
     setConsultationId(res.data.id);
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
+    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
     chunksRef.current = [];
 
     recorder.ondataavailable = (e) => {
@@ -60,14 +60,14 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       recorder.stop();
     });
 
-    const blob = new Blob(chunksRef.current, { type: 'audio/wav' });
+    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
 
     const pres = await api.post('/uploads/presign', {
       kind: 'audio',
       patientId,
       consultationId,
-      contentType: 'audio/wav',
-      originalName: `consultation-${consultationId}.wav`,
+      contentType: 'audio/webm',
+      originalName: `consultation-${consultationId}.webm`,
     });
 
     const presign = pres.data.presign;
@@ -75,7 +75,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
     await fetch(presign.url, {
       method: 'PUT',
-      headers: { 'content-type': 'audio/wav' },
+      headers: { 'content-type': 'audio/webm' },
       body: blob,
     });
 
@@ -85,8 +85,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       patientId,
       consultationId,
       objectKey,
-      contentType: 'audio/wav',
-      originalName: `consultation-${consultationId}.wav`,
+      contentType: 'audio/webm',
+      originalName: `consultation-${consultationId}.webm`,
     });
 
     await api.post(`/consultations/${consultationId}/stop`, {
