@@ -98,7 +98,7 @@ export default function ConsultationDetailPage({ params }: { params: { id: strin
         <h2 className="font-semibold">Transcript</h2>
         <div className="mt-3 text-sm text-gray-800 whitespace-pre-wrap">
           {(() => {
-            const t = c?.transcript;
+            const t = c?.normalizedTranscriptEn ?? c?.transcript;
             if (!t) return 'No transcript yet.';
             if (typeof t.text === 'string' && t.text.trim().length) return t.text;
             const segs = Array.isArray(t.segments) ? t.segments : [];
