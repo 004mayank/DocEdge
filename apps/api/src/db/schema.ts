@@ -61,10 +61,13 @@ export const consultations = pgTable('consultations', {
     .defaultNow()
     .notNull(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
+  inputLanguage: varchar('input_language', { length: 16 }).default('en'),
+  outputLanguage: varchar('output_language', { length: 16 }).default('en'),
   audioObjectKey: text('audio_object_key'),
-  transcript: jsonb('transcript'), // { language, segments: [{t0,t1,speaker,text}] }
-  soapNote: jsonb('soap_note'), // { subjective, objective, assessment, plan }
-  aiInsights: jsonb('ai_insights'), // { entities, actions, warnings }
+  transcript: jsonb('transcript'),
+  normalizedTranscriptEn: jsonb('normalized_transcript_en'),
+  soapNote: jsonb('soap_note'),
+  aiInsights: jsonb('ai_insights'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

@@ -15,6 +15,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const [state, setState] = useState<State>('idle');
   const [consultationId, setConsultationId] = useState<string | null>(null);
   const [message, setMessage] = useState<string>('');
+  const [inputLanguage, setInputLanguage] = useState<'en' | 'hi' | 'hi-en'>('en');
   const [soap, setSoap] = useState<any>(null);
   const [insights, setInsights] = useState<any>(null);
 
@@ -28,7 +29,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
     setSoap(null);
     setInsights(null);
 
-    const res = await api.post('/consultations/start', { patientId });
+    const res = await api.post('/consultations/start', { patientId, inputLanguage });
     setConsultationId(res.data.id);
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -123,7 +124,20 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       </p>
 
       <div className="mt-6 border rounded-xl p-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="text-sm">
+            Spoken language:&nbsp;
+            <select
+              className="border rounded px-2 py-1"
+              value={inputLanguage}
+              onChange={(e) => setInputLanguage(e.target.value as any)}
+              disabled={state === 'recording' || state === 'uploading' || state === 'processing'}
+            >
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="hi-en">Hinglish</option>
+            </select>
+          </div>
           <button
             disabled={state !== 'idle' && state !== 'done' && state !== 'error'}
             className="bg-black text-white rounded px-4 py-2 disabled:opacity-50"

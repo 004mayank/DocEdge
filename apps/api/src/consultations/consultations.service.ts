@@ -17,7 +17,10 @@ export class ConsultationsService {
     private readonly jobs: JobsService,
   ) {}
 
-  async start(user: AuthUser, dto: { patientId: string }) {
+  async start(
+    user: AuthUser,
+    dto: { patientId: string; inputLanguage?: 'en' | 'hi' | 'hi-en' },
+  ) {
     const p = await this.dbConn.db
       .select()
       .from(patients)
@@ -36,6 +39,8 @@ export class ConsultationsService {
         doctorUserId: user.userId,
         patientId: dto.patientId,
         status: 'active',
+        inputLanguage: dto.inputLanguage ?? 'en',
+        outputLanguage: 'en',
       })
       .returning();
 

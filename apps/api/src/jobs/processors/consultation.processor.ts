@@ -5,6 +5,7 @@ import { DB } from '../../db/db.module';
 import { consultations, timelineEvents } from '../../db/schema';
 import { and, eq } from 'drizzle-orm';
 import { AiService } from '../../ai/ai.service';
+import { TranslateService } from '../../ai/translate.service';
 import { S3GetService } from '../../uploads/s3.get.service';
 import { DeepgramService } from '../../stt/deepgram.service';
 
@@ -13,6 +14,7 @@ export class ConsultationProcessor extends WorkerHost {
   constructor(
     @Inject(DB) private readonly dbConn: { db: any; pool: any },
     private readonly ai: AiService,
+    private readonly translate: TranslateService,
     private readonly s3get: S3GetService,
     private readonly deepgram: DeepgramService,
   ) {
@@ -35,28 +37,47 @@ export class ConsultationProcessor extends WorkerHost {
     }
 
     const audio = await this.s3get.getObjectBuffer(c.audioObjectKey);
+    const inputLang = (c.inputLanguage as string) || 'en';
+
+    const sttLang = inputLang === 'hi-en' ? undefined : inputLang;
+
     const transcriptResult = await this.deepgram.transcribe({
       audioBuffer: audio.buffer,
       mimetype: audio.contentType ?? 'application/octet-stream',
-      language: (c.transcript as any)?.language ?? 'en',
+      language: sttLang,
     });
 
-    const transcript = {
-      language: transcriptResult.language,
+    const transcriptOriginal = {
+      language: inputLang,
       segments: transcriptResult.segments,
       text: transcriptResult.text,
     };
 
+    let transcriptEn = transcriptOriginal;
+    if (inputLang !== 'en') {
+      transcriptEn = await this.translate.translateDiarizedTranscriptToEnglish({
+        language: inputLang,
+        segments: (transcriptOriginal.segments ?? []).map((s: any) => ({
+          speaker: s.speaker,
+          text: s.text,
+          t0: s.t0,
+          t1: s.t1,
+        })),
+      });
+    }
+
     const note = await this.ai.generateSoapNote({
-      transcriptText: transcriptResult.text,
-      language: transcriptResult.language ?? 'en',
+      transcriptText:
+        transcriptEn.text ?? this.ai.flattenTranscript(transcriptEn),
+      language: 'en',
     });
 
     await this.dbConn.db
       .update(consultations)
       .set({
         status: 'completed',
-        transcript,
+        transcript: transcriptOriginal,
+        normalizedTranscriptEn: transcriptEn,
         soapNote: note.soap,
         aiInsights: note.insights,
       })

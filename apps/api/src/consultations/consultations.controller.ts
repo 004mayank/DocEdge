@@ -5,6 +5,7 @@ import { ConsultationsService } from './consultations.service';
 
 const StartSchema = z.object({
   patientId: z.string().uuid(),
+  inputLanguage: z.enum(['en', 'hi', 'hi-en']).optional(),
 });
 
 const StopSchema = z.object({
