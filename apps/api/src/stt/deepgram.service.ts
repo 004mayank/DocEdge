@@ -16,7 +16,7 @@ export class DeepgramService {
     const url = new URL('https://api.deepgram.com/v1/listen');
     url.searchParams.set('punctuate', 'true');
     url.searchParams.set('smart_format', 'true');
-    url.searchParams.set('diarize', 'false');
+    url.searchParams.set('diarize', 'true');
     if (params.language) url.searchParams.set('language', params.language);
 
     const res = await request(url.toString(), {
@@ -37,24 +37,37 @@ export class DeepgramService {
 
     const alt = json?.results?.channels?.[0]?.alternatives?.[0];
     const transcriptText: string = alt?.transcript ?? '';
-    const words = alt?.words ?? [];
+    const words: any[] = alt?.words ?? [];
 
-    // Map Deepgram words to our segment format (simple single-speaker for MVP)
-    const segments = words.length
-      ? [
-          {
-            t0: words[0].start,
-            t1: words[words.length - 1].end,
-            speaker: 'unknown',
-            text: transcriptText,
-            words: words.map((w: any) => ({
-              t0: w.start,
-              t1: w.end,
-              word: w.word,
-            })),
-          },
-        ]
-      : [];
+    // Build diarized segments by speaker id, MVP mapping:
+    // speaker 0 => doctor, speaker 1 => patient
+    const labelSpeaker = (sid: any) => {
+      if (sid === 0) return 'doctor';
+      if (sid === 1) return 'patient';
+      return 'unknown';
+    };
+
+    const segments: any[] = [];
+    let cur: any | null = null;
+
+    for (const w of words) {
+      const speaker = labelSpeaker(w.speaker);
+      if (!cur || cur.speaker !== speaker) {
+        if (cur) segments.push(cur);
+        cur = {
+          t0: w.start,
+          t1: w.end,
+          speaker,
+          text: w.word,
+          words: [{ t0: w.start, t1: w.end, word: w.word }],
+        };
+      } else {
+        cur.t1 = w.end;
+        cur.text = `${cur.text} ${w.word}`;
+        cur.words.push({ t0: w.start, t1: w.end, word: w.word });
+      }
+    }
+    if (cur) segments.push(cur);
 
     return {
       language: params.language ?? 'en',
