@@ -10,6 +10,7 @@ import {
 import { z } from 'zod';
 import { JwtGuard } from '../auth/jwt.guard';
 import { ConsultationsReadService } from '../consultations/consultations.read.service';
+import { PatientArtifactsService } from './patient.artifacts.service';
 import { PatientsService } from './patients.service';
 
 const CreatePatientSchema = z.object({
@@ -24,6 +25,7 @@ export class PatientsController {
   constructor(
     private readonly patients: PatientsService,
     private readonly consultationsRead: ConsultationsReadService,
+    private readonly artifacts: PatientArtifactsService,
   ) {}
 
   @Post()
@@ -45,5 +47,11 @@ export class PatientsController {
   @Get(':id/consultations')
   async consultations(@Param('id') id: string, @Req() req: any) {
     return this.consultationsRead.listByPatient(req.user, id);
+  }
+
+  @Get(':id/artifacts')
+  async listArtifacts(@Param('id') id: string, @Req() req: any) {
+    const kind = (req.query?.kind as string | undefined) ?? undefined;
+    return this.artifacts.list(req.user, id, kind);
   }
 }
