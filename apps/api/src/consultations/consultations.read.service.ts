@@ -62,4 +62,20 @@ export class ConsultationsReadService {
     if (!c) throw new NotFoundException('Consultation not found');
     return c;
   }
+
+  async updateSoap(user: AuthUser, id: string, soapNote: any) {
+    const updated = await this.dbConn.db
+      .update(consultations)
+      .set({ soapNote })
+      .where(
+        and(
+          eq(consultations.id, id),
+          eq(consultations.clinicId, user.clinicId),
+        ),
+      )
+      .returning();
+
+    if (!updated[0]) throw new NotFoundException('Consultation not found');
+    return updated[0];
+  }
 }

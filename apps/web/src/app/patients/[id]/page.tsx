@@ -85,15 +85,17 @@ export default function PatientDetailPage({ params }: { params: { id: string } }
           <ul className="mt-3 space-y-2 text-sm">
             {consultations.map((c) => (
               <li key={c.id} className="border rounded p-2">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">{c.status}</div>
-                  <div className="text-xs text-gray-600">{c.endedAt ?? c.startedAt}</div>
-                </div>
-                {c.soapNote?.assessment && (
-                  <div className="text-xs text-gray-700 mt-1 line-clamp-2">
-                    {c.soapNote.assessment}
+                <a className="block" href={`/consultations/${c.id}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium">{c.status}</div>
+                    <div className="text-xs text-gray-600">{c.endedAt ?? c.startedAt}</div>
                   </div>
-                )}
+                  {c.soapNote?.assessment && (
+                    <div className="text-xs text-gray-700 mt-1 line-clamp-2">
+                      {c.soapNote.assessment}
+                    </div>
+                  )}
+                </a>
               </li>
             ))}
           </ul>
