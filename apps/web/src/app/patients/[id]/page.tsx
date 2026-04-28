@@ -10,6 +10,7 @@ export default function PatientDetailPage({ params }: { params: { id: string } }
   const [timeline, setTimeline] = useState<any[]>([]);
   const [consultations, setConsultations] = useState<any[]>([]);
   const [artifacts, setArtifacts] = useState<any[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,6 +40,44 @@ export default function PatientDetailPage({ params }: { params: { id: string } }
     const res = await api.get(`/uploads/artifacts/${artifactId}/presign-get`);
     const url = res.data?.presign?.url;
     if (url) window.open(url, '_blank');
+  }
+
+  async function onUploadFile(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const kind = file.type.startsWith('image/') ? 'image' : 'document';
+      const pres = await api.post('/uploads/presign', {
+        kind,
+        patientId,
+        contentType: file.type || 'application/octet-stream',
+        originalName: file.name,
+      });
+
+      const presign = pres.data.presign;
+      const objectKey = pres.data.object.key;
+
+      await fetch(presign.url, {
+        method: 'PUT',
+        headers: { 'content-type': file.type || 'application/octet-stream' },
+        body: file,
+      });
+
+      await api.post('/uploads/register', {
+        kind,
+        patientId,
+        objectKey,
+        contentType: file.type || 'application/octet-stream',
+        originalName: file.name,
+      });
+
+      const as = await api.get(`/patients/${patientId}/artifacts`);
+      setArtifacts(as.data.items ?? []);
+    } catch (e: any) {
+      setError(e?.response?.data?.message ?? e.message ?? 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -103,13 +142,31 @@ export default function PatientDetailPage({ params }: { params: { id: string } }
       </section>
 
       <section className="mt-6 border rounded-xl p-4">
-        <h2 className="font-semibold">Artifacts</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">Artifacts</h2>
+          <label className={`border rounded px-3 py-1 cursor-pointer ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+            {uploading ? 'Uploading…' : 'Upload'}
+            <input
+              type="file"
+              className="hidden"
+              accept="application/pdf,image/*"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onUploadFile(f);
+                e.currentTarget.value = '';
+              }}
+            />
+          </label>
+        </div>
+
         <ul className="mt-3 space-y-2 text-sm">
           {artifacts.map((a) => (
             <li key={a.id} className="border rounded p-2 flex items-center justify-between">
               <div>
                 <div className="font-medium">{a.originalName ?? a.objectKey}</div>
-                <div className="text-xs text-gray-600">{a.kind} • {a.createdAt}</div>
+                <div className="text-xs text-gray-600">
+                  {a.kind} • {a.createdAt}
+                </div>
               </div>
               <button className="border rounded px-3 py-1" onClick={() => downloadArtifact(a.id)}>
                 Download
