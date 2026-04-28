@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { z } from 'zod';
 import { JwtGuard } from '../auth/jwt.guard';
+import { ConsultationsReadService } from '../consultations/consultations.read.service';
 import { PatientsService } from './patients.service';
 
 const CreatePatientSchema = z.object({
@@ -20,7 +21,10 @@ const CreatePatientSchema = z.object({
 @Controller('patients')
 @UseGuards(JwtGuard)
 export class PatientsController {
-  constructor(private readonly patients: PatientsService) {}
+  constructor(
+    private readonly patients: PatientsService,
+    private readonly consultationsRead: ConsultationsReadService,
+  ) {}
 
   @Post()
   async create(@Body() body: unknown, @Req() req: any) {
@@ -36,5 +40,10 @@ export class PatientsController {
   @Get(':id/timeline')
   async timeline(@Param('id') id: string, @Req() req: any) {
     return this.patients.timeline(req.user, id);
+  }
+
+  @Get(':id/consultations')
+  async consultations(@Param('id') id: string, @Req() req: any) {
+    return this.consultationsRead.listByPatient(req.user, id);
   }
 }
