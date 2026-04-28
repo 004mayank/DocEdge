@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 export const EnvSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z
+    .enum(['development', 'test', 'production'])
+    .default('development'),
   PORT: z.coerce.number().default(3001),
 
   DATABASE_URL: z.string().min(1),
@@ -29,7 +31,10 @@ export function loadEnv(): Env {
   const parsed = EnvSchema.safeParse(process.env);
   if (!parsed.success) {
     // eslint-disable-next-line no-console
-    console.error('Invalid environment variables', parsed.error.flatten().fieldErrors);
+    console.error(
+      'Invalid environment variables',
+      parsed.error.flatten().fieldErrors,
+    );
     throw new Error('Invalid environment variables');
   }
   return parsed.data;
