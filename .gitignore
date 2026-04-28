@@ -1,0 +1,12 @@
+# dependencies
+node_modules
+
+# env
+.env
+
+# build
+apps/api/dist
+apps/web/.next
+
+# misc
+.DS_Store
