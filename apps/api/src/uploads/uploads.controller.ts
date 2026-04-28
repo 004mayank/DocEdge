@@ -11,6 +11,16 @@ const PresignSchema = z.object({
   originalName: z.string().min(1).optional(),
 });
 
+const RegisterSchema = z.object({
+  kind: z.enum(['audio', 'document', 'image']),
+  patientId: z.string().uuid(),
+  consultationId: z.string().uuid().optional(),
+  objectKey: z.string().min(1),
+  contentType: z.string().optional(),
+  originalName: z.string().optional(),
+  metadata: z.any().optional(),
+});
+
 @Controller('uploads')
 @UseGuards(JwtGuard)
 export class UploadsController {
@@ -20,5 +30,11 @@ export class UploadsController {
   async presign(@Body() body: unknown, @Req() req: any) {
     const dto = PresignSchema.parse(body);
     return this.uploads.presignPut(req.user, dto);
+  }
+
+  @Post('register')
+  async register(@Body() body: unknown, @Req() req: any) {
+    const dto = RegisterSchema.parse(body);
+    return this.uploads.registerArtifact(req.user, dto);
   }
 }

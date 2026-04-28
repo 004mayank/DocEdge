@@ -87,6 +87,30 @@ export class UploadsService {
       metadata?: any;
     },
   ) {
+    const p = await this.dbConn.db
+      .select()
+      .from(patients)
+      .where(
+        and(
+          eq(patients.id, dto.patientId),
+          eq(patients.clinicId, user.clinicId),
+        ),
+      );
+    if (!p[0]) throw new ForbiddenException('Invalid patient');
+
+    if (dto.consultationId) {
+      const c = await this.dbConn.db
+        .select()
+        .from(consultations)
+        .where(
+          and(
+            eq(consultations.id, dto.consultationId),
+            eq(consultations.clinicId, user.clinicId),
+          ),
+        );
+      if (!c[0]) throw new ForbiddenException('Invalid consultation');
+    }
+
     const created = await this.dbConn.db
       .insert(artifacts)
       .values({
