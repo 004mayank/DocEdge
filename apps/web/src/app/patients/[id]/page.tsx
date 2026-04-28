@@ -61,6 +61,12 @@ export default function PatientDetailPage({ params }: { params: { id: string } }
 
       {error && <div className="mt-6 text-sm text-red-600">{error}</div>}
 
+      <div className="mt-6">
+        <a className="inline-block bg-black text-white rounded px-4 py-2" href={`/patients/${patientId}/consult`}>
+          Start consultation
+        </a>
+      </div>
+
       <section className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="border rounded-xl p-4">
           <h2 className="font-semibold">Timeline</h2>
