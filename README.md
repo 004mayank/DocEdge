@@ -22,6 +22,24 @@ infra/
 ```
 
 ## Local dev
+
+### Option A: Docker Compose (recommended)
+
+See `infra/README.md`.
+
+Quick start:
+```bash
+cp .env.example .env
+
+docker compose --env-file .env -f infra/docker-compose.full.yml up -d --build
+```
+
+URLs:
+- Web: http://localhost:3000
+- API: http://localhost:3002
+
+### Option B: Run apps locally (pnpm)
+
 1) Copy env
 ```bash
 cp .env.example .env
