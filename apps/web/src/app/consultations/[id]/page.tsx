@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { loadToken } from '@/lib/auth';
 
@@ -11,11 +11,11 @@ export default function ConsultationDetailPage({ params }: { params: { id: strin
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const res = await api.get(`/consultations/${id}`);
     setC(res.data);
     setSoap(res.data.soapNote ?? { subjective: '', objective: '', assessment: '', plan: '' });
-  }
+  }, [id]);
 
   useEffect(() => {
     const t = loadToken();
@@ -41,7 +41,7 @@ export default function ConsultationDetailPage({ params }: { params: { id: strin
     }, 1500);
 
     return () => window.clearInterval(interval);
-  }, [id]);
+  }, [id, refresh]);
 
   async function save() {
     setSaving(true);
