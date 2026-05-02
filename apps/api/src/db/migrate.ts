@@ -1,7 +1,6 @@
 import { Pool } from 'pg';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { glob } from 'glob';
 import { loadEnv } from '../config/env';
 
 async function ensureMigrationsTable(pool: Pool) {
@@ -32,8 +31,15 @@ export async function runMigrations() {
   try {
     await ensureMigrationsTable(pool);
 
-    const dir = path.resolve(__dirname, '../../drizzle');
-    const files = (await glob('*.sql', { cwd: dir })).sort();
+    // In dist build, __dirname is dist/src/db.
+    // We copy migrations to /app/drizzle in the container, which resolves here:
+    // dist/src/db -> dist/src -> dist -> (project root)
+    const dir = path.resolve(__dirname, '../../../drizzle');
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const files = entries
+      .filter((e) => e.isFile() && e.name.endsWith('.sql'))
+      .map((e) => e.name)
+      .sort();
 
     for (const f of files) {
       if (await hasMigration(pool, f)) continue;

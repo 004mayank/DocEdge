@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { loadEnv } from '../config/env';
-import { request } from 'undici';
+// Use the built-in fetch (Node 18+) to avoid undici version/runtime quirks.
 
 @Injectable()
 export class DeepgramService {
@@ -19,21 +19,22 @@ export class DeepgramService {
     url.searchParams.set('diarize', 'true');
     if (params.language) url.searchParams.set('language', params.language);
 
-    const res = await request(url.toString(), {
+    const res = await fetch(url.toString(), {
       method: 'POST',
       headers: {
         authorization: `Token ${this.env.DEEPGRAM_API_KEY}`,
         'content-type': params.mimetype,
       },
-      body: params.audioBuffer,
+      // Node fetch types are stricter than undici request; Uint8Array satisfies BodyInit.
+      body: new Uint8Array(params.audioBuffer),
     });
 
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      const txt = await res.body.text();
-      throw new Error(`Deepgram error ${res.statusCode}: ${txt}`);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Deepgram error ${res.status}: ${txt}`);
     }
 
-    const json: any = await res.body.json();
+    const json: any = await res.json();
 
     const alt = json?.results?.channels?.[0]?.alternatives?.[0];
     const transcriptText: string = alt?.transcript ?? '';

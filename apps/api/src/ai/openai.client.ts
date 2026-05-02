@@ -1,5 +1,5 @@
 import { loadEnv } from '../config/env';
-import { request } from 'undici';
+// Use the built-in fetch (Node 18+) to avoid undici version/runtime quirks.
 
 export async function openaiChatJson<T>(opts: {
   system: string;
@@ -26,7 +26,7 @@ export async function openaiChatJson<T>(opts: {
     response_format: { type: 'json_object' },
   };
 
-  const res = await request('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       authorization: `Bearer ${env.OPENAI_API_KEY}`,
@@ -35,12 +35,12 @@ export async function openaiChatJson<T>(opts: {
     body: JSON.stringify(body),
   });
 
-  if (res.statusCode < 200 || res.statusCode >= 300) {
-    const txt = await res.body.text();
-    throw new Error(`OpenAI error ${res.statusCode}: ${txt}`);
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`OpenAI error ${res.status}: ${txt}`);
   }
 
-  const json: any = await res.body.json();
+  const json: any = await res.json();
   const content = json.choices?.[0]?.message?.content;
   if (!content) throw new Error('OpenAI empty response');
   return JSON.parse(content) as T;

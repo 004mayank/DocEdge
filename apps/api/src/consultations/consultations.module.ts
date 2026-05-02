@@ -9,5 +9,6 @@ import { ConsultationsReadService } from './consultations.read.service';
   imports: [JobsModule],
   controllers: [ConsultationsController, ConsultationsReadController],
   providers: [ConsultationsService, ConsultationsReadService],
+  exports: [ConsultationsReadService],
 })
 export class ConsultationsModule {}

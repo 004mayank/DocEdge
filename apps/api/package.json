@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
+    "build:worker": "tsc -p tsconfig.worker.json",
     "start": "nest start",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
