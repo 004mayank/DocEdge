@@ -74,6 +74,21 @@ export class RealtimeGateway {
           // Prefer utterance-level diarization if available (more stable than word grouping)
           const segments: Array<{ speaker: number; text: string }> = [];
           if (Array.isArray(evt.utterances) && evt.utterances.length) {
+            // Basic overlap handling: if we see multiple speakers in the same callback,
+            // treat it as potential overlap and add an explicit marker segment.
+            const speakerSet = new Set<number>();
+            for (const u of evt.utterances) {
+              if (typeof u?.speaker === 'number') speakerSet.add(u.speaker);
+            }
+            const overlap = speakerSet.size > 1;
+
+            if (overlap) {
+              segments.push({
+                speaker: -1,
+                text: 'Overlapping speech detected',
+              });
+            }
+
             for (const u of evt.utterances) {
               if (!u?.transcript) continue;
               segments.push({

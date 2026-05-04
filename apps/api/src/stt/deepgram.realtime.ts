@@ -37,7 +37,9 @@ export class DeepgramRealtimeClient {
     url.searchParams.set('interim_results', 'true');
     url.searchParams.set('diarize', 'true');
     url.searchParams.set('utterances', 'true');
-    url.searchParams.set('endpointing', '100');
+    url.searchParams.set('vad_events', 'true');
+    // Slightly higher endpointing helps stabilize utterance boundaries.
+    url.searchParams.set('endpointing', '400');
     // Realtime streaming works best with raw PCM.
     url.searchParams.set('encoding', 'linear16');
     url.searchParams.set('sample_rate', '16000');

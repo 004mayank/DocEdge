@@ -157,7 +157,11 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       const renderSegments = (p: any) => {
         if (Array.isArray(p?.segments) && p.segments.length) {
           const lines = p.segments
-            .map((s: any) => `Speaker ${s.speaker}: ${s.text}`)
+            .map((s: any) =>
+              s.speaker === -1
+                ? `[${s.text}]`
+                : `Speaker ${s.speaker}: ${s.text}`,
+            )
             .join('\n');
           setLiveText(lines);
         } else if (typeof p?.text === 'string') {
