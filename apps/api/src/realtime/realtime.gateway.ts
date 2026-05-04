@@ -71,22 +71,33 @@ export class RealtimeGateway {
               `dg transcript socket=${socket.id} final=${evt.isFinal} chars=${evt.transcript.length}`,
             );
           }
-          const words = evt.words ?? [];
+          // Prefer utterance-level diarization if available (more stable than word grouping)
           const segments: Array<{ speaker: number; text: string }> = [];
-          let cur: { speaker: number; text: string } | null = null;
-
-          for (const w of words) {
-            const sid = typeof w.speaker === 'number' ? w.speaker : 0;
-            const token = w.word;
-            if (!token) continue;
-            if (!cur || cur.speaker !== sid) {
-              if (cur) segments.push(cur);
-              cur = { speaker: sid, text: token };
-            } else {
-              cur.text = `${cur.text} ${token}`;
+          if (Array.isArray(evt.utterances) && evt.utterances.length) {
+            for (const u of evt.utterances) {
+              if (!u?.transcript) continue;
+              segments.push({
+                speaker: typeof u.speaker === 'number' ? u.speaker : 0,
+                text: u.transcript,
+              });
             }
+          } else {
+            const words = evt.words ?? [];
+            let cur: { speaker: number; text: string } | null = null;
+
+            for (const w of words) {
+              const sid = typeof w.speaker === 'number' ? w.speaker : 0;
+              const token = w.word;
+              if (!token) continue;
+              if (!cur || cur.speaker !== sid) {
+                if (cur) segments.push(cur);
+                cur = { speaker: sid, text: token };
+              } else {
+                cur.text = `${cur.text} ${token}`;
+              }
+            }
+            if (cur) segments.push(cur);
           }
-          if (cur) segments.push(cur);
 
           socket.emit(evt.isFinal ? 'final' : 'partial', {
             text: evt.transcript,

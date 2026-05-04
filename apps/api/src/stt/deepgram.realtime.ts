@@ -11,6 +11,7 @@ export type DeepgramRealtimeTranscriptEvent = {
   transcript: string;
   // diarization per word when available
   words?: Array<{ word: string; speaker?: number; start?: number; end?: number }>;
+  utterances?: Array<{ transcript: string; speaker?: number; start?: number; end?: number }>;
   raw: any;
 };
 
@@ -35,6 +36,7 @@ export class DeepgramRealtimeClient {
     url.searchParams.set('smart_format', 'true');
     url.searchParams.set('interim_results', 'true');
     url.searchParams.set('diarize', 'true');
+    url.searchParams.set('utterances', 'true');
     url.searchParams.set('endpointing', '100');
     // Realtime streaming works best with raw PCM.
     url.searchParams.set('encoding', 'linear16');
@@ -67,10 +69,17 @@ export class DeepgramRealtimeClient {
         const alt = msg?.channel?.alternatives?.[0];
         const transcript = alt?.transcript ?? '';
         const words = alt?.words;
+        const utterances = msg?.utterances;
         const isFinal = Boolean(msg?.is_final || msg?.speech_final);
 
-        if (transcript) {
-          this.onTranscript?.({ isFinal, transcript, words, raw: msg });
+        if (transcript || (Array.isArray(utterances) && utterances.length)) {
+          this.onTranscript?.({
+            isFinal,
+            transcript,
+            words,
+            utterances,
+            raw: msg,
+          });
         }
       } catch {
         // ignore
