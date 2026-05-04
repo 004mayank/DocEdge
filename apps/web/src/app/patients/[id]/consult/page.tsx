@@ -86,15 +86,26 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         : new MediaRecorder(stream);
       chunksRef.current = [];
 
-      // Realtime transcript (MVP): send chunks to API over Socket.IO
+      // Realtime transcript: connect and wait for server 'ready' before sending audio.
       const sock = io(getApiOrigin() || window.location.origin, {
         path: '/ws',
         transports: ['websocket'],
       });
       socketRef.current = sock;
 
+      const ready = new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('Realtime STT handshake timeout')), 8000);
+        sock.on('ready', () => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+
       sock.on('connect', () => {
-        sock.emit('start', { mimetype: contentType || 'audio/webm', language: inputLanguage });
+        sock.emit('start', {
+          mimetype: contentType || 'audio/webm',
+          language: inputLanguage,
+        });
       });
       sock.on('connect_error', (e: any) => {
         setMessage(`Realtime connect error: ${e?.message ?? e}`);
@@ -143,6 +154,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
       };
+
+      await ready;
 
       // Emit chunks frequently for realtime STT.
       recorder.start(250);
