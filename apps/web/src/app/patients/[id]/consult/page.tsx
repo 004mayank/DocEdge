@@ -19,6 +19,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const intervalRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const [state, setState] = useState<State>('idle');
   const [consultationId, setConsultationId] = useState<string | null>(null);
@@ -29,6 +31,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const [contentType, setContentType] = useState<string>('audio/webm');
   const [liveText, setLiveText] = useState<string>('');
   const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const [meter, setMeter] = useState<number[]>(Array.from({ length: 10 }, () => 0));
 
   useEffect(() => {
     const t = loadToken();
@@ -57,9 +60,20 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       try {
         audioCtxRef.current?.close();
       } catch {}
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
+
+  function fmt(sec: number) {
+    const m = Math.floor(sec / 60)
+      .toString()
+      .padStart(2, '0');
+    const s = Math.floor(sec % 60)
+      .toString()
+      .padStart(2, '0');
+    return `${m}:${s}`;
+  }
 
   function downsampleTo16k(float32: Float32Array, inSampleRate: number) {
     const outSampleRate = 16000;
@@ -194,6 +208,14 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       const audioCtx: AudioContext = new AudioCtx();
       audioCtxRef.current = audioCtx;
       const src = audioCtx.createMediaStreamSource(stream);
+
+      // Listening meter
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.85;
+      analyserRef.current = analyser;
+      src.connect(analyser);
+
       const proc = audioCtx.createScriptProcessor(4096, 1, 1);
       procRef.current = proc;
 
@@ -210,6 +232,33 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
       src.connect(proc);
       proc.connect(audioCtx.destination);
+
+      // Animate bars from analyser
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const loop = () => {
+        const a = analyserRef.current;
+        if (!a) return;
+        a.getByteFrequencyData(data);
+        // Build 10 bars from low-mid frequencies
+        const bars = 10;
+        const out: number[] = [];
+        for (let i = 0; i < bars; i++) {
+          const start = Math.floor((i * data.length) / bars);
+          const end = Math.floor(((i + 1) * data.length) / bars);
+          let sum = 0;
+          let cnt = 0;
+          for (let j = start; j < end; j++) {
+            sum += data[j];
+            cnt++;
+          }
+          // normalize 0..1
+          out.push(Math.min(1, (sum / (cnt || 1)) / 255));
+        }
+        setMeter(out);
+        rafRef.current = requestAnimationFrame(loop);
+      };
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(loop);
 
       // Emit chunks frequently for realtime STT.
       recorder.start(250);
@@ -236,13 +285,18 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
       setState('uploading');
 
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+
       // Stop realtime
       try {
         socketRef.current?.emit('stop');
         socketRef.current?.disconnect();
       } catch {}
 
-    await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve) => {
       recorder.onstop = () => resolve();
       recorder.stop();
     });
@@ -304,6 +358,10 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       setMessage('Done');
       if (intervalRef.current) clearInterval(intervalRef.current);
       startedAtRef.current = null;
+
+      analyserRef.current = null;
+      procRef.current = null;
+      audioCtxRef.current = null;
     } catch (err: any) {
       fail(err, 'Failed to stop/upload/process consultation');
     }
@@ -351,7 +409,21 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
           </button>
           <div className="text-sm text-gray-700">State: {state}</div>
           {state === 'recording' && (
-            <div className="text-sm text-gray-700">• Listening… {elapsedSec}s</div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-end gap-1 h-6">
+                {meter.map((v, i) => (
+                  <div
+                    key={i}
+                    className="w-1.5 rounded bg-black/70"
+                    style={{ height: `${Math.max(2, Math.round(v * 24))}px` }}
+                  />
+                ))}
+              </div>
+              <div className="text-sm text-gray-700">
+                <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse mr-2" />
+                Listening {fmt(elapsedSec)}
+              </div>
+            </div>
           )}
         </div>
         {consultationId && (
