@@ -23,6 +23,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const rafRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const levelRef = useRef<number>(0);
+  const historyRef = useRef<number[]>([]);
+  const lastTsRef = useRef<number>(0);
 
   const [state, setState] = useState<State>('idle');
   const [consultationId, setConsultationId] = useState<string | null>(null);
@@ -235,7 +237,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       src.connect(proc);
       proc.connect(audioCtx.destination);
 
-      // Animate bars from analyser
+      // Animate bars + waveform from analyser
       const freq = new Uint8Array(analyser.frequencyBinCount);
       const time = new Uint8Array(analyser.fftSize);
       const loop = () => {
@@ -284,17 +286,29 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
             }
             const rms = Math.sqrt(sumSq / time.length);
 
-            // Attack/release smoothing so it doesn't flatline immediately
+            // Time-aware attack/release with slow decay (so it doesn't flatline quickly)
+            const now = performance.now();
+            const dt = Math.max(0.001, (now - (lastTsRef.current || now)) / 1000);
+            lastTsRef.current = now;
+
             const prev = levelRef.current || 0;
-            const attack = 0.35;
-            const release = 0.06;
-            const next = rms > prev ? prev + (rms - prev) * attack : prev + (rms - prev) * release;
+            const attackTau = 0.12; // ~120ms
+            const releaseTau = 1.4; // ~1.4s
+            const attackA = 1 - Math.exp(-dt / attackTau);
+            const releaseA = 1 - Math.exp(-dt / releaseTau);
+            const coeff = rms > prev ? attackA : releaseA;
+            const next = prev + (rms - prev) * coeff;
             levelRef.current = next;
 
-            // Noise floor + gain
-            const minLevel = 0.12;
-            const gain = 4.0;
+            // Visual envelope + history
+            const minLevel = 0.08;
+            const gain = 5.0;
             const env = Math.max(minLevel, Math.min(1, next * gain));
+
+            const hist = historyRef.current;
+            hist.push(env);
+            const maxPoints = 240; // ~8s @ ~30fps
+            if (hist.length > maxPoints) hist.splice(0, hist.length - maxPoints);
             ctx.clearRect(0, 0, w, h);
 
             // background
@@ -320,15 +334,30 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
 
+            // Scrolling envelope waveform (top + mirrored bottom)
+            const arr = historyRef.current;
+            const n = arr.length;
             ctx.beginPath();
-            for (let i = 0; i < time.length; i++) {
-              const v = (time[i] - 128) / 128; // -1..1
-              const y = mid + v * (h * 0.48) * env;
-              const x = (i / (time.length - 1)) * w;
+            for (let i = 0; i < n; i++) {
+              const x = n <= 1 ? 0 : (i / (n - 1)) * w;
+              const amp = arr[i];
+              const y = mid - (h * 0.38) * amp;
               if (i === 0) ctx.moveTo(x, y);
               else ctx.lineTo(x, y);
             }
             ctx.stroke();
+
+            ctx.globalAlpha = 0.55;
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) {
+              const x = n <= 1 ? 0 : (i / (n - 1)) * w;
+              const amp = arr[i];
+              const y = mid + (h * 0.38) * amp;
+              if (i === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.globalAlpha = 1;
           }
         }
 
