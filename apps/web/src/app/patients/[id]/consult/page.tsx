@@ -24,35 +24,57 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
     if (!t) window.location.href = '/login';
   }, []);
 
+  function fail(err: any, fallback: string) {
+    const msg =
+      err?.name === 'NotAllowedError'
+        ? 'Microphone permission denied. Allow mic access in your browser settings and try again.'
+        : err?.name === 'NotFoundError'
+          ? 'No microphone found. Connect/select an input device and try again.'
+          : err?.message ?? fallback;
+    setState('error');
+    setMessage(msg);
+  }
+
   async function start() {
-    setMessage('');
-    setSoap(null);
-    setInsights(null);
+    try {
+      setMessage('');
+      setSoap(null);
+      setInsights(null);
 
-    const res = await api.post('/consultations/start', { patientId, inputLanguage });
-    setConsultationId(res.data.id);
+      // Ask for mic access *before* creating a consultation, so we don't leave
+      // orphaned "active" consultations when the mic is unavailable.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-    chunksRef.current = [];
+      const res = await api.post('/consultations/start', {
+        patientId,
+        inputLanguage,
+      });
+      setConsultationId(res.data.id);
 
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-    };
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      chunksRef.current = [];
 
-    recorder.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
-    };
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      };
 
-    recorder.start();
-    mediaRecorderRef.current = recorder;
-    setState('recording');
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setState('recording');
+    } catch (err: any) {
+      fail(err, 'Failed to start recording');
+    }
   }
 
   async function stop() {
-    if (!consultationId) return;
-    const recorder = mediaRecorderRef.current;
-    if (!recorder) return;
+    try {
+      if (!consultationId) return;
+      const recorder = mediaRecorderRef.current;
+      if (!recorder) return;
 
     setState('uploading');
 
@@ -95,21 +117,30 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       language: 'en',
     });
 
-    setState('processing');
-    setMessage('Processing…');
+      setState('processing');
+      setMessage('Processing…');
 
     // Poll status
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const s = await api.get(`/consultations/${consultationId}/status`);
-      if (s.data.status === 'completed') break;
-    }
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const s = await api.get(`/consultations/${consultationId}/status`);
+        if (s.data.status === 'completed') break;
+        if (s.data.status === 'failed') {
+          throw new Error(
+            s.data.error?.message ??
+              'Consultation processing failed (see server logs for details)',
+          );
+        }
+      }
 
-    const full = await api.get(`/consultations/${consultationId}`);
-    setSoap(full.data.soapNote);
-    setInsights(full.data.aiInsights);
-    setState('done');
-    setMessage('Done');
+      const full = await api.get(`/consultations/${consultationId}`);
+      setSoap(full.data.soapNote);
+      setInsights(full.data.aiInsights);
+      setState('done');
+      setMessage('Done');
+    } catch (err: any) {
+      fail(err, 'Failed to stop/upload/process consultation');
+    }
   }
 
   return (
