@@ -183,6 +183,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
             .join('\n');
           setLiveText(lines);
         } else if (typeof p?.text === 'string') {
+          // Fast path: show interim transcript even if diarization segments aren't ready.
           setLiveText(p.text);
         }
       };
@@ -220,7 +221,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       analyserRef.current = analyser;
       src.connect(analyser);
 
-      const proc = audioCtx.createScriptProcessor(4096, 1, 1);
+      // Smaller buffer => lower latency for realtime captions.
+      const proc = audioCtx.createScriptProcessor(1024, 1, 1);
       procRef.current = proc;
 
       proc.onaudioprocess = (evt) => {
