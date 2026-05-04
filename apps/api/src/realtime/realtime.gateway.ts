@@ -52,43 +52,54 @@ export class RealtimeGateway {
 
     this.logger.log(`start socket=${socket.id} mimetype=${mimetype} lang=${language ?? ''}`);
 
+    // Create session and ACK immediately so the client can start streaming.
     const dg = new DeepgramRealtimeClient({ mimetype, language });
-    await dg.connect((evt) => {
-      // Build diarized segments from words when available.
-      const words = evt.words ?? [];
-      const segments: Array<{ speaker: number; text: string }> = [];
-      let cur: { speaker: number; text: string } | null = null;
-
-      for (const w of words) {
-        const sid = typeof w.speaker === 'number' ? w.speaker : 0;
-        const token = w.word;
-        if (!token) continue;
-        if (!cur || cur.speaker !== sid) {
-          if (cur) segments.push(cur);
-          cur = { speaker: sid, text: token };
-        } else {
-          cur.text = `${cur.text} ${token}`;
-        }
-      }
-      if (cur) segments.push(cur);
-
-      const payload = {
-        text: evt.transcript,
-        segments,
-        isFinal: evt.isFinal,
-      };
-
-      socket.emit(evt.isFinal ? 'final' : 'partial', payload);
-    });
-
     this.sessions.set(socket.id, {
       chunks: [],
       mimetype,
       language,
       dg,
     });
-
     socket.emit('ready', { ok: true });
+
+    // Connect to Deepgram asynchronously. If it fails, report to client.
+    (async () => {
+      try {
+        await dg.connect((evt) => {
+          const words = evt.words ?? [];
+          const segments: Array<{ speaker: number; text: string }> = [];
+          let cur: { speaker: number; text: string } | null = null;
+
+          for (const w of words) {
+            const sid = typeof w.speaker === 'number' ? w.speaker : 0;
+            const token = w.word;
+            if (!token) continue;
+            if (!cur || cur.speaker !== sid) {
+              if (cur) segments.push(cur);
+              cur = { speaker: sid, text: token };
+            } else {
+              cur.text = `${cur.text} ${token}`;
+            }
+          }
+          if (cur) segments.push(cur);
+
+          socket.emit(evt.isFinal ? 'final' : 'partial', {
+            text: evt.transcript,
+            segments,
+            isFinal: evt.isFinal,
+          });
+        });
+
+        this.logger.log(`deepgram connected socket=${socket.id}`);
+      } catch (e: any) {
+        this.logger.error(
+          `deepgram connect failed socket=${socket.id} err=${e?.message ?? e}`,
+        );
+        socket.emit('error', {
+          message: `Deepgram realtime connect failed: ${e?.message ?? e}`,
+        });
+      }
+    })();
   }
 
   @SubscribeMessage('audio')
@@ -107,6 +118,8 @@ export class RealtimeGateway {
     }
 
     try {
+      // If deepgram isn't connected yet, drop audio silently (client will keep sending).
+      if (s.dg && !s.dg.isConnected()) return;
       s.dg?.sendAudio(new Uint8Array(buf));
     } catch (e: any) {
       this.logger.warn(`sendAudio failed socket=${socket.id} err=${e?.message ?? e}`);

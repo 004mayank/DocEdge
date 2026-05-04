@@ -18,11 +18,15 @@ export type DeepgramRealtimeTranscriptEvent = {
 export class DeepgramRealtimeClient {
   private env = loadEnv();
   private ws: WebSocket | null = null;
+  private onTranscript: ((e: DeepgramRealtimeTranscriptEvent) => void) | null =
+    null;
 
   constructor(private opts: DeepgramRealtimeOptions) {}
 
   async connect(onTranscript: (e: DeepgramRealtimeTranscriptEvent) => void) {
     if (!this.env.DEEPGRAM_API_KEY) throw new Error('DEEPGRAM_API_KEY not set');
+
+    this.onTranscript = onTranscript;
 
     const url = new URL('wss://api.deepgram.com/v1/listen');
     url.searchParams.set('model', 'nova-2');
@@ -61,12 +65,16 @@ export class DeepgramRealtimeClient {
         const isFinal = Boolean(msg?.is_final || msg?.speech_final);
 
         if (transcript) {
-          onTranscript({ isFinal, transcript, words, raw: msg });
+          this.onTranscript?.({ isFinal, transcript, words, raw: msg });
         }
       } catch {
         // ignore
       }
     });
+  }
+
+  isConnected() {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN;
   }
 
   sendAudio(chunk: Uint8Array) {
@@ -83,4 +91,3 @@ export class DeepgramRealtimeClient {
     } catch {}
   }
 }
-
