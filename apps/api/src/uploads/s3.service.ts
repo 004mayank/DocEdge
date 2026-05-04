@@ -3,6 +3,14 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { loadEnv } from '../config/env';
 
+function replaceUrlOrigin(url: string, newOrigin: string) {
+  const u = new URL(url);
+  const o = new URL(newOrigin);
+  u.protocol = o.protocol;
+  u.host = o.host;
+  return u.toString();
+}
+
 @Injectable()
 export class S3Service {
   private env = loadEnv();
@@ -27,9 +35,16 @@ export class S3Service {
       ContentType: params.contentType,
     });
 
-    const url = await getSignedUrl(this.client, cmd, {
+    let url = await getSignedUrl(this.client, cmd, {
       expiresIn: params.expiresInSeconds ?? 60 * 10,
     });
+
+    // If running in Docker, the S3 endpoint used by the server might be an
+    // internal hostname (e.g., http://minio:9000) that browsers can't reach.
+    // Rewrite the origin for client-facing uploads when configured.
+    if (this.env.S3_PUBLIC_ENDPOINT) {
+      url = replaceUrlOrigin(url, this.env.S3_PUBLIC_ENDPOINT);
+    }
 
     return {
       url,

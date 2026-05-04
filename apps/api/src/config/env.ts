@@ -12,6 +12,10 @@ export const EnvSchema = z.object({
   JWT_SECRET: z.string().min(16),
 
   S3_ENDPOINT: z.string().url().optional(),
+  // Public URL used by browsers to upload/download via presigned URLs.
+  // In Docker dev, S3_ENDPOINT is typically http://minio:9000 (internal),
+  // while clients need http://localhost:9000.
+  S3_PUBLIC_ENDPOINT: z.string().url().optional(),
   S3_REGION: z.string().default('ap-south-1'),
   S3_BUCKET: z.string().default('docedge'),
   S3_ACCESS_KEY_ID: z.string().min(1),

@@ -75,6 +75,8 @@ services:
       DATABASE_URL: postgres://docedge:docedge@postgres:5432/docedge
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
+      # Browser clients must upload to the host-mapped MinIO port.
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       S3_BUCKET: docedge
 
       S3_REGION: ap-south-1
@@ -111,6 +113,7 @@ services:
       DATABASE_URL: postgres://docedge:docedge@postgres:5432/docedge
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       S3_BUCKET: docedge
 
       S3_REGION: ap-south-1
