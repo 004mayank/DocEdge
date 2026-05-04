@@ -1,4 +1,5 @@
 import { loadEnv } from '../config/env';
+import WebSocket from 'ws';
 
 export type DeepgramRealtimeOptions = {
   language?: string;
@@ -48,13 +49,13 @@ export class DeepgramRealtimeClient {
     const ws = this.ws;
 
     await new Promise<void>((resolve, reject) => {
-      ws.addEventListener('open', () => resolve());
-      ws.addEventListener('error', (e) => reject(e));
+      ws.on('open', () => resolve());
+      ws.on('error', (e: any) => reject(e));
     });
 
-    ws.addEventListener('message', (evt: any) => {
+    ws.on('message', (data: any) => {
       try {
-        const dataStr = typeof evt.data === 'string' ? evt.data : evt.data?.toString?.();
+        const dataStr = typeof data === 'string' ? data : data?.toString?.();
         if (!dataStr) return;
         const msg = JSON.parse(dataStr);
 
