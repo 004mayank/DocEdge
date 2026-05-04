@@ -92,12 +92,19 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       sock.on('connect', () => {
         sock.emit('start', { mimetype: contentType || 'audio/webm', language: inputLanguage });
       });
-      sock.on('partial', (p: any) => {
-        if (typeof p?.text === 'string') setLiveText(p.text);
-      });
-      sock.on('final', (p: any) => {
-        if (typeof p?.text === 'string') setLiveText(p.text);
-      });
+      const renderSegments = (p: any) => {
+        if (Array.isArray(p?.segments) && p.segments.length) {
+          const lines = p.segments
+            .map((s: any) => `Speaker ${s.speaker}: ${s.text}`)
+            .join('\n');
+          setLiveText(lines);
+        } else if (typeof p?.text === 'string') {
+          setLiveText(p.text);
+        }
+      };
+
+      sock.on('partial', renderSegments);
+      sock.on('final', renderSegments);
       sock.on('error', (e: any) => {
         // Keep recording even if realtime STT hiccups
         const msg = e?.message ? `Realtime STT: ${e.message}` : 'Realtime STT error';
@@ -127,7 +134,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         stream.getTracks().forEach((t) => t.stop());
       };
 
-      recorder.start();
+      // Emit chunks frequently for realtime STT.
+      recorder.start(250);
       mediaRecorderRef.current = recorder;
       setState('recording');
 

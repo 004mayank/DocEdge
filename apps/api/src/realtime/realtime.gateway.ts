@@ -7,6 +7,7 @@ import {
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { DeepgramService } from '../stt/deepgram.service';
+import { DeepgramRealtimeClient } from '../stt/deepgram.realtime';
 
 // Minimal realtime gateway.
 // Client protocol (Socket.IO):
@@ -33,6 +34,7 @@ export class RealtimeGateway {
       chunks: Buffer[];
       mimetype: string;
       language?: string;
+      dg?: DeepgramRealtimeClient;
     }
   >();
 
@@ -42,11 +44,45 @@ export class RealtimeGateway {
     @MessageBody()
     body: { mimetype: string; language?: 'en' | 'hi' | 'hi-en' },
   ) {
+    const mimetype = body?.mimetype ?? 'audio/webm;codecs=opus';
+    const language = body?.language;
+
+    const dg = new DeepgramRealtimeClient({ mimetype, language });
+    await dg.connect((evt) => {
+      // Build diarized segments from words when available.
+      const words = evt.words ?? [];
+      const segments: Array<{ speaker: number; text: string }> = [];
+      let cur: { speaker: number; text: string } | null = null;
+
+      for (const w of words) {
+        const sid = typeof w.speaker === 'number' ? w.speaker : 0;
+        const token = w.word;
+        if (!token) continue;
+        if (!cur || cur.speaker !== sid) {
+          if (cur) segments.push(cur);
+          cur = { speaker: sid, text: token };
+        } else {
+          cur.text = `${cur.text} ${token}`;
+        }
+      }
+      if (cur) segments.push(cur);
+
+      const payload = {
+        text: evt.transcript,
+        segments,
+        isFinal: evt.isFinal,
+      };
+
+      socket.emit(evt.isFinal ? 'final' : 'partial', payload);
+    });
+
     this.sessions.set(socket.id, {
       chunks: [],
-      mimetype: body?.mimetype ?? 'audio/webm',
-      language: body?.language,
+      mimetype,
+      language,
+      dg,
     });
+
     socket.emit('ready', { ok: true });
   }
 
@@ -61,21 +97,10 @@ export class RealtimeGateway {
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
     s.chunks.push(buf);
 
-    // MVP: naive "partial" by running Deepgram on accumulated audio every N chunks.
-    // This is NOT true streaming; next iteration will use Deepgram realtime WS.
-    if (s.chunks.length % 8 !== 0) return;
-
     try {
-      const merged = Buffer.concat(s.chunks);
-      const sttLang = s.language === 'hi-en' ? undefined : s.language;
-      const out = await this.deepgram.transcribe({
-        audioBuffer: merged,
-        mimetype: s.mimetype,
-        language: sttLang,
-      });
-      socket.emit('partial', { text: out.text ?? '' });
+      s.dg?.sendAudio(new Uint8Array(buf));
     } catch (e: any) {
-      socket.emit('error', { message: e?.message ?? 'STT failed' });
+      socket.emit('error', { message: e?.message ?? 'Realtime STT failed' });
     }
   }
 
@@ -86,17 +111,9 @@ export class RealtimeGateway {
     this.sessions.delete(socket.id);
 
     try {
-      const merged = Buffer.concat(s.chunks);
-      const sttLang = s.language === 'hi-en' ? undefined : s.language;
-      const out = await this.deepgram.transcribe({
-        audioBuffer: merged,
-        mimetype: s.mimetype,
-        language: sttLang,
-      });
-      socket.emit('final', { text: out.text ?? '' });
+      await s.dg?.close();
     } catch (e: any) {
-      socket.emit('error', { message: e?.message ?? 'STT failed' });
+      socket.emit('error', { message: e?.message ?? 'Failed to close realtime STT' });
     }
   }
 }
-
