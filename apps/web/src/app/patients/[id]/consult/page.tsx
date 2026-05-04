@@ -474,18 +474,9 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
                   className="w-full h-16 rounded-lg border border-white/10"
                 />
               </div>
-              <div className="flex items-end gap-1 h-6">
-                {meter.map((v, i) => (
-                  <div
-                    key={i}
-                    className="w-1.5 rounded bg-black/70"
-                    style={{ height: `${Math.max(2, Math.round(v * 24))}px` }}
-                  />
-                ))}
-              </div>
-              <div className="text-sm text-gray-700">
-                <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse mr-2" />
-                Listening {fmt(elapsedSec)}
+              <div className="text-base font-medium text-gray-800">
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse mr-2" />
+                Listening <span className="font-mono">{fmt(elapsedSec)}</span>
               </div>
             </div>
           )}
