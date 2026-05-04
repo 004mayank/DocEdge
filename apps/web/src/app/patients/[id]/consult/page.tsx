@@ -22,6 +22,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const levelRef = useRef<number>(0);
 
   const [state, setState] = useState<State>('idle');
   const [consultationId, setConsultationId] = useState<string | null>(null);
@@ -274,6 +275,26 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
           const ctx = canvas.getContext('2d');
           if (ctx) {
             a.getByteTimeDomainData(time);
+
+            // Compute RMS level from time-domain data (0..1)
+            let sumSq = 0;
+            for (let i = 0; i < time.length; i++) {
+              const v = (time[i] - 128) / 128; // -1..1
+              sumSq += v * v;
+            }
+            const rms = Math.sqrt(sumSq / time.length);
+
+            // Attack/release smoothing so it doesn't flatline immediately
+            const prev = levelRef.current || 0;
+            const attack = 0.35;
+            const release = 0.06;
+            const next = rms > prev ? prev + (rms - prev) * attack : prev + (rms - prev) * release;
+            levelRef.current = next;
+
+            // Noise floor + gain
+            const minLevel = 0.06;
+            const gain = 2.2;
+            const env = Math.max(minLevel, Math.min(1, next * gain));
             ctx.clearRect(0, 0, w, h);
 
             // background
@@ -295,14 +316,14 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
             grad.addColorStop(0.5, '#a855f7');
             grad.addColorStop(1, '#22d3ee');
             ctx.strokeStyle = grad;
-            ctx.lineWidth = 2.5 * dpr;
+            ctx.lineWidth = (2.5 + env * 1.2) * dpr;
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
 
             ctx.beginPath();
             for (let i = 0; i < time.length; i++) {
-              const v = time[i] / 128.0; // 0..2
-              const y = v * (h / 2);
+              const v = (time[i] - 128) / 128; // -1..1
+              const y = mid + v * (h * 0.40) * env;
               const x = (i / (time.length - 1)) * w;
               if (i === 0) ctx.moveTo(x, y);
               else ctx.lineTo(x, y);
