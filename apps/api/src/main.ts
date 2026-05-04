@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { loadEnv } from './config/env';
 import { runMigrations } from './db/migrate';
+import { ZodExceptionFilter } from './shared/zod-exception.filter';
 
 async function bootstrap() {
   const env = loadEnv();
@@ -11,6 +12,8 @@ async function bootstrap() {
   await runMigrations();
 
   const app = await NestFactory.create(AppModule);
+  // Ensure Zod validation errors become a clean 400 response (not a 500).
+  app.useGlobalFilters(new ZodExceptionFilter());
   await app.listen(env.PORT);
 }
 bootstrap();
