@@ -56,7 +56,7 @@ export const consultations = pgTable('consultations', {
   patientId: uuid('patient_id')
     .notNull()
     .references(() => patients.id),
-  status: varchar('status', { length: 32 }).notNull(), // 'active' | 'processing' | 'completed'
+  status: varchar('status', { length: 32 }).notNull(), // 'active' | 'processing' | 'completed' | 'failed'
   startedAt: timestamp('started_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -68,6 +68,7 @@ export const consultations = pgTable('consultations', {
   normalizedTranscriptEn: jsonb('normalized_transcript_en'),
   soapNote: jsonb('soap_note'),
   aiInsights: jsonb('ai_insights'),
+  error: jsonb('error'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

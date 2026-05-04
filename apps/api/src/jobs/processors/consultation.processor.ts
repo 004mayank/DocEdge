@@ -32,68 +32,100 @@ export class ConsultationProcessor extends WorkerHost {
     const c = rows[0];
     if (!c) return;
 
-    if (!c.audioObjectKey) {
-      throw new Error('Missing audioObjectKey for consultation');
-    }
+    try {
+      if (!c.audioObjectKey) {
+        throw new Error('Missing audioObjectKey for consultation');
+      }
 
-    const audio = await this.s3get.getObjectBuffer(c.audioObjectKey);
-    const inputLang = (c.inputLanguage as string) || 'en';
+      const audio = await this.s3get.getObjectBuffer(c.audioObjectKey);
+      const inputLang = (c.inputLanguage as string) || 'en';
 
-    const sttLang = inputLang === 'hi-en' ? undefined : inputLang;
+      const sttLang = inputLang === 'hi-en' ? undefined : inputLang;
 
-    const transcriptResult = await this.deepgram.transcribe({
-      audioBuffer: audio.buffer,
-      mimetype: audio.contentType ?? 'application/octet-stream',
-      language: sttLang,
-    });
-
-    const transcriptOriginal = {
-      language: inputLang,
-      segments: transcriptResult.segments,
-      text: transcriptResult.text,
-    };
-
-    let transcriptEn = transcriptOriginal;
-    if (inputLang !== 'en') {
-      transcriptEn = await this.translate.translateDiarizedTranscriptToEnglish({
-        language: inputLang,
-        segments: (transcriptOriginal.segments ?? []).map((s: any) => ({
-          speaker: s.speaker,
-          text: s.text,
-          t0: s.t0,
-          t1: s.t1,
-        })),
+      const transcriptResult = await this.deepgram.transcribe({
+        audioBuffer: audio.buffer,
+        mimetype: audio.contentType ?? 'application/octet-stream',
+        language: sttLang,
       });
+
+      const transcriptOriginal = {
+        language: inputLang,
+        segments: transcriptResult.segments,
+        text: transcriptResult.text,
+      };
+
+      let transcriptEn = transcriptOriginal;
+      if (inputLang !== 'en') {
+        transcriptEn = await this.translate.translateDiarizedTranscriptToEnglish({
+          language: inputLang,
+          segments: (transcriptOriginal.segments ?? []).map((s: any) => ({
+            speaker: s.speaker,
+            text: s.text,
+            t0: s.t0,
+            t1: s.t1,
+          })),
+        });
+      }
+
+      const note = await this.ai.generateSoapNote({
+        transcriptText:
+          transcriptEn.text ?? this.ai.flattenTranscript(transcriptEn),
+        language: 'en',
+      });
+
+      await this.dbConn.db
+        .update(consultations)
+        .set({
+          status: 'completed',
+          transcript: transcriptOriginal,
+          normalizedTranscriptEn: transcriptEn,
+          soapNote: note.soap,
+          aiInsights: note.insights,
+          error: null,
+        })
+        .where(
+          and(
+            eq(consultations.id, consultationId),
+            eq(consultations.clinicId, c.clinicId),
+          ),
+        );
+
+      await this.dbConn.db.insert(timelineEvents).values({
+        clinicId: c.clinicId,
+        patientId: c.patientId,
+        type: 'consultation_completed',
+        refId: c.id,
+        payload: { consultationId: c.id },
+      });
+    } catch (err: any) {
+      const error = {
+        message: err?.message ?? String(err),
+        name: err?.name,
+        stack: err?.stack,
+      };
+
+      await this.dbConn.db
+        .update(consultations)
+        .set({
+          status: 'failed',
+          error,
+        })
+        .where(
+          and(
+            eq(consultations.id, consultationId),
+            eq(consultations.clinicId, c.clinicId),
+          ),
+        );
+
+      await this.dbConn.db.insert(timelineEvents).values({
+        clinicId: c.clinicId,
+        patientId: c.patientId,
+        type: 'consultation_failed',
+        refId: c.id,
+        payload: { consultationId: c.id, error: error.message },
+      });
+
+      throw err;
     }
-
-    const note = await this.ai.generateSoapNote({
-      transcriptText:
-        transcriptEn.text ?? this.ai.flattenTranscript(transcriptEn),
-      language: 'en',
-    });
-
-    await this.dbConn.db
-      .update(consultations)
-      .set({
-        status: 'completed',
-        transcript: transcriptOriginal,
-        normalizedTranscriptEn: transcriptEn,
-        soapNote: note.soap,
-        aiInsights: note.insights,
-      })
-      .where(
-        and(
-          eq(consultations.id, consultationId),
-          eq(consultations.clinicId, c.clinicId),
-        ),
-      );
-
-    await this.dbConn.db.insert(timelineEvents).values({
-      clinicId: c.clinicId,
-      patientId: c.patientId,
-      type: 'consultation_completed',
-      refId: c.id,
-      payload: { consultationId: c.id },
-    });
   }
 }
