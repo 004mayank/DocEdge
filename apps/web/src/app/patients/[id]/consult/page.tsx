@@ -18,10 +18,24 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const [inputLanguage, setInputLanguage] = useState<'en' | 'hi' | 'hi-en'>('en');
   const [soap, setSoap] = useState<any>(null);
   const [insights, setInsights] = useState<any>(null);
+  const [contentType, setContentType] = useState<string>('audio/webm');
 
   useEffect(() => {
     const t = loadToken();
     if (!t) window.location.href = '/login';
+
+    // Pick a stable recording mimeType for this browser.
+    const preferred = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+    ];
+    const picked =
+      typeof MediaRecorder !== 'undefined'
+        ? preferred.find((t) => MediaRecorder.isTypeSupported(t))
+        : undefined;
+    if (picked) setContentType(picked);
   }, []);
 
   function fail(err: any, fallback: string) {
@@ -51,7 +65,9 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       });
       setConsultationId(res.data.id);
 
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      const recorder = contentType
+        ? new MediaRecorder(stream, { mimeType: contentType })
+        : new MediaRecorder(stream);
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -83,14 +99,14 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       recorder.stop();
     });
 
-    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    const blob = new Blob(chunksRef.current, { type: contentType || 'audio/webm' });
 
     const pres = await api.post('/uploads/presign', {
       kind: 'audio',
       patientId,
       consultationId,
-      contentType: 'audio/webm',
-      originalName: `consultation-${consultationId}.webm`,
+      contentType: contentType || 'audio/webm',
+      originalName: `consultation-${consultationId}.${(contentType || 'audio/webm').includes('mp4') ? 'mp4' : 'webm'}`,
     });
 
     const presign = pres.data.presign;
@@ -98,7 +114,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
     await fetch(presign.url, {
       method: 'PUT',
-      headers: { 'content-type': 'audio/webm' },
+      headers: { 'content-type': contentType || 'audio/webm' },
       body: blob,
     });
 
@@ -108,8 +124,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       patientId,
       consultationId,
       objectKey,
-      contentType: 'audio/webm',
-      originalName: `consultation-${consultationId}.webm`,
+      contentType: contentType || 'audio/webm',
+      originalName: `consultation-${consultationId}.${(contentType || 'audio/webm').includes('mp4') ? 'mp4' : 'webm'}`,
     });
 
     await api.post(`/consultations/${consultationId}/stop`, {
