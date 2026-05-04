@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { loadToken } from '@/lib/auth';
 import { io, Socket } from 'socket.io-client';
+import { getApiOrigin } from '@/lib/api';
 
 type State = 'idle' | 'recording' | 'uploading' | 'processing' | 'done' | 'error';
 
@@ -86,7 +87,10 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       chunksRef.current = [];
 
       // Realtime transcript (MVP): send chunks to API over Socket.IO
-      const sock = io(window.location.origin, { path: '/ws', transports: ['websocket'] });
+      const sock = io(getApiOrigin() || window.location.origin, {
+        path: '/ws',
+        transports: ['websocket'],
+      });
       socketRef.current = sock;
 
       sock.on('connect', () => {

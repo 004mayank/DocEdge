@@ -4,6 +4,17 @@ import axios from 'axios';
 // If you *do* set NEXT_PUBLIC_API_BASE_URL, it will override this.
 const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || '/api';
 
+// For realtime connections (Socket.IO/WebSocket) we need an absolute origin.
+// If baseURL is '/api', use same-origin.
+export function getApiOrigin() {
+  if (typeof window === 'undefined') {
+    // Best effort for server-side usage; clients should pass NEXT_PUBLIC_API_BASE_URL.
+    return process.env.NEXT_PUBLIC_API_BASE_URL || '';
+  }
+  if (baseURL.startsWith('http://') || baseURL.startsWith('https://')) return baseURL;
+  return window.location.origin;
+}
+
 export const api = axios.create({
   baseURL,
 });
