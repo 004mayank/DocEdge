@@ -17,6 +17,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const audioSeqRef = useRef<number>(0);
   const startedAtRef = useRef<number | null>(null);
   const intervalRef = useRef<any>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const procRef = useRef<ScriptProcessorNode | null>(null);
 
   const [state, setState] = useState<State>('idle');
   const [consultationId, setConsultationId] = useState<string | null>(null);
@@ -49,9 +51,48 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       try {
         socketRef.current?.disconnect();
       } catch {}
+      try {
+        procRef.current?.disconnect();
+      } catch {}
+      try {
+        audioCtxRef.current?.close();
+      } catch {}
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
+
+  function downsampleTo16k(float32: Float32Array, inSampleRate: number) {
+    const outSampleRate = 16000;
+    if (inSampleRate === outSampleRate) return float32;
+    const ratio = inSampleRate / outSampleRate;
+    const newLen = Math.round(float32.length / ratio);
+    const result = new Float32Array(newLen);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+      let accum = 0;
+      let count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < float32.length; i++) {
+        accum += float32[i];
+        count++;
+      }
+      result[offsetResult] = accum / (count || 1);
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    return result;
+  }
+
+  function floatTo16BitPCM(float32: Float32Array) {
+    const buf = new ArrayBuffer(float32.length * 2);
+    const view = new DataView(buf);
+    for (let i = 0; i < float32.length; i++) {
+      let s = Math.max(-1, Math.min(1, float32[i]));
+      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return new Uint8Array(buf);
+  }
 
   function fail(err: any, fallback: string) {
     const msg =
@@ -135,19 +176,6 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
           chunksRef.current.push(e.data);
-
-          // Send chunk for realtime STT (best-effort)
-          const s = socketRef.current;
-          if (s && s.connected) {
-            // Convert Blob to ArrayBuffer then emit as binary
-            (async () => {
-              try {
-                const ab = await (e.data as Blob).arrayBuffer();
-                audioSeqRef.current += 1;
-                s.emit('audio', new Uint8Array(ab));
-              } catch {}
-            })();
-          }
         }
       };
 
@@ -156,6 +184,28 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       };
 
       await ready;
+
+      // Start PCM realtime streaming (linear16 @ 16kHz mono)
+      const AudioCtx = (window.AudioContext || (window as any).webkitAudioContext) as any;
+      const audioCtx: AudioContext = new AudioCtx();
+      audioCtxRef.current = audioCtx;
+      const src = audioCtx.createMediaStreamSource(stream);
+      const proc = audioCtx.createScriptProcessor(4096, 1, 1);
+      procRef.current = proc;
+
+      proc.onaudioprocess = (evt) => {
+        const input = evt.inputBuffer.getChannelData(0);
+        const down = downsampleTo16k(input, audioCtx.sampleRate);
+        const pcm16 = floatTo16BitPCM(down);
+        const s = socketRef.current;
+        if (s && s.connected) {
+          audioSeqRef.current += 1;
+          s.emit('audio', pcm16);
+        }
+      };
+
+      src.connect(proc);
+      proc.connect(audioCtx.destination);
 
       // Emit chunks frequently for realtime STT.
       recorder.start(250);
