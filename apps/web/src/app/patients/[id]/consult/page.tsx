@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { loadToken } from '@/lib/auth';
+import { io, Socket } from 'socket.io-client';
 
 type State = 'idle' | 'recording' | 'uploading' | 'processing' | 'done' | 'error';
 
@@ -11,6 +12,10 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const socketRef = useRef<Socket | null>(null);
+  const audioSeqRef = useRef<number>(0);
+  const startedAtRef = useRef<number | null>(null);
+  const intervalRef = useRef<any>(null);
 
   const [state, setState] = useState<State>('idle');
   const [consultationId, setConsultationId] = useState<string | null>(null);
@@ -19,6 +24,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const [soap, setSoap] = useState<any>(null);
   const [insights, setInsights] = useState<any>(null);
   const [contentType, setContentType] = useState<string>('audio/webm');
+  const [liveText, setLiveText] = useState<string>('');
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
 
   useEffect(() => {
     const t = loadToken();
@@ -36,6 +43,13 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         ? preferred.find((t) => MediaRecorder.isTypeSupported(t))
         : undefined;
     if (picked) setContentType(picked);
+
+    return () => {
+      try {
+        socketRef.current?.disconnect();
+      } catch {}
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, []);
 
   function fail(err: any, fallback: string) {
@@ -54,6 +68,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       setMessage('');
       setSoap(null);
       setInsights(null);
+      setLiveText('');
 
       // Ask for mic access *before* creating a consultation, so we don't leave
       // orphaned "active" consultations when the mic is unavailable.
@@ -70,8 +85,42 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         : new MediaRecorder(stream);
       chunksRef.current = [];
 
+      // Realtime transcript (MVP): send chunks to API over Socket.IO
+      const sock = io(window.location.origin, { path: '/ws', transports: ['websocket'] });
+      socketRef.current = sock;
+
+      sock.on('connect', () => {
+        sock.emit('start', { mimetype: contentType || 'audio/webm', language: inputLanguage });
+      });
+      sock.on('partial', (p: any) => {
+        if (typeof p?.text === 'string') setLiveText(p.text);
+      });
+      sock.on('final', (p: any) => {
+        if (typeof p?.text === 'string') setLiveText(p.text);
+      });
+      sock.on('error', (e: any) => {
+        // Keep recording even if realtime STT hiccups
+        const msg = e?.message ? `Realtime STT: ${e.message}` : 'Realtime STT error';
+        setMessage(msg);
+      });
+
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data && e.data.size > 0) {
+          chunksRef.current.push(e.data);
+
+          // Send chunk for realtime STT (best-effort)
+          const s = socketRef.current;
+          if (s && s.connected) {
+            // Convert Blob to ArrayBuffer then emit as binary
+            (async () => {
+              try {
+                const ab = await (e.data as Blob).arrayBuffer();
+                audioSeqRef.current += 1;
+                s.emit('audio', new Uint8Array(ab));
+              } catch {}
+            })();
+          }
+        }
       };
 
       recorder.onstop = () => {
@@ -81,6 +130,14 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       recorder.start();
       mediaRecorderRef.current = recorder;
       setState('recording');
+
+      startedAtRef.current = Date.now();
+      setElapsedSec(0);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = setInterval(() => {
+        if (!startedAtRef.current) return;
+        setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
+      }, 250);
     } catch (err: any) {
       fail(err, 'Failed to start recording');
     }
@@ -92,7 +149,13 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       const recorder = mediaRecorderRef.current;
       if (!recorder) return;
 
-    setState('uploading');
+      setState('uploading');
+
+      // Stop realtime
+      try {
+        socketRef.current?.emit('stop');
+        socketRef.current?.disconnect();
+      } catch {}
 
     await new Promise<void>((resolve) => {
       recorder.onstop = () => resolve();
@@ -154,6 +217,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       setInsights(full.data.aiInsights);
       setState('done');
       setMessage('Done');
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      startedAtRef.current = null;
     } catch (err: any) {
       fail(err, 'Failed to stop/upload/process consultation');
     }
@@ -200,6 +265,9 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
             Stop
           </button>
           <div className="text-sm text-gray-700">State: {state}</div>
+          {state === 'recording' && (
+            <div className="text-sm text-gray-700">• Listening… {elapsedSec}s</div>
+          )}
         </div>
         {consultationId && (
           <div className="mt-3 text-sm text-gray-600">
@@ -208,6 +276,16 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         )}
         {message && <div className="mt-3 text-sm">{message}</div>}
       </div>
+
+      <section className="mt-6 border rounded-xl p-4">
+        <h2 className="font-semibold">Live transcript</h2>
+        <p className="mt-2 text-sm text-gray-600">
+          Updates while recording (MVP). Final transcript is saved on Stop.
+        </p>
+        <div className="mt-3 text-sm whitespace-pre-wrap min-h-[80px]">
+          {liveText || (state === 'recording' ? 'Listening…' : '—')}
+        </div>
+      </section>
 
       {soap && (
         <section className="mt-8 border rounded-xl p-4">

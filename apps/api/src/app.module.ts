@@ -8,6 +8,7 @@ import { ConsultationsModule } from './consultations/consultations.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { AiModule } from './ai/ai.module';
 import { JobsModule } from './jobs/jobs.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { JobsModule } from './jobs/jobs.module';
     UploadsModule,
     AiModule,
     JobsModule,
+    RealtimeModule,
   ],
   controllers: [AppController],
   providers: [AppService],
