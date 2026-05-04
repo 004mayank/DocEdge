@@ -66,6 +66,11 @@ export class RealtimeGateway {
     (async () => {
       try {
         await dg.connect((evt) => {
+          if (evt.transcript) {
+            this.logger.log(
+              `dg transcript socket=${socket.id} final=${evt.isFinal} chars=${evt.transcript.length}`,
+            );
+          }
           const words = evt.words ?? [];
           const segments: Array<{ speaker: number; text: string }> = [];
           let cur: { speaker: number; text: string } | null = null;
