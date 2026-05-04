@@ -92,6 +92,12 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       sock.on('connect', () => {
         sock.emit('start', { mimetype: contentType || 'audio/webm', language: inputLanguage });
       });
+      sock.on('connect_error', (e: any) => {
+        setMessage(`Realtime connect error: ${e?.message ?? e}`);
+      });
+      sock.on('disconnect', (reason: any) => {
+        setMessage(`Realtime disconnected: ${reason}`);
+      });
       const renderSegments = (p: any) => {
         if (Array.isArray(p?.segments) && p.segments.length) {
           const lines = p.segments

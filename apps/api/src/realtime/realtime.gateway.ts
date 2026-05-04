@@ -8,6 +8,7 @@ import {
 import type { Server, Socket } from 'socket.io';
 import { DeepgramService } from '../stt/deepgram.service';
 import { DeepgramRealtimeClient } from '../stt/deepgram.realtime';
+import { Logger } from '@nestjs/common';
 
 // Minimal realtime gateway.
 // Client protocol (Socket.IO):
@@ -25,6 +26,8 @@ import { DeepgramRealtimeClient } from '../stt/deepgram.realtime';
 })
 export class RealtimeGateway {
   @WebSocketServer() server!: Server;
+
+  private readonly logger = new Logger(RealtimeGateway.name);
 
   constructor(private readonly deepgram: DeepgramService) {}
 
@@ -46,6 +49,8 @@ export class RealtimeGateway {
   ) {
     const mimetype = body?.mimetype ?? 'audio/webm;codecs=opus';
     const language = body?.language;
+
+    this.logger.log(`start socket=${socket.id} mimetype=${mimetype} lang=${language ?? ''}`);
 
     const dg = new DeepgramRealtimeClient({ mimetype, language });
     await dg.connect((evt) => {
@@ -97,9 +102,14 @@ export class RealtimeGateway {
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
     s.chunks.push(buf);
 
+    if (s.chunks.length === 1) {
+      this.logger.log(`first audio socket=${socket.id} bytes=${buf.length}`);
+    }
+
     try {
       s.dg?.sendAudio(new Uint8Array(buf));
     } catch (e: any) {
+      this.logger.warn(`sendAudio failed socket=${socket.id} err=${e?.message ?? e}`);
       socket.emit('error', { message: e?.message ?? 'Realtime STT failed' });
     }
   }
