@@ -8,6 +8,7 @@ import { AiService } from '../../ai/ai.service';
 import { TranslateService } from '../../ai/translate.service';
 import { S3GetService } from '../../uploads/s3.get.service';
 import { DeepgramService } from '../../stt/deepgram.service';
+import { inferQnaFromUtterances } from '../../consultations/inference';
 
 @Processor('consultation')
 export class ConsultationProcessor extends WorkerHost {
@@ -73,6 +74,32 @@ export class ConsultationProcessor extends WorkerHost {
         language: 'en',
       });
 
+      // If diarization is unreliable (single speaker), infer Q/A as a fallback.
+      let inferredQna: any = null;
+      try {
+        const segs = (transcriptOriginal as any)?.segments ?? [];
+        const speakerSet = new Set<string>();
+        for (const s of segs) {
+          if (s?.speaker) speakerSet.add(String(s.speaker));
+        }
+        if (speakerSet.size <= 1) {
+          const rawUtterances = (transcriptResult as any)?.raw?.utterances;
+          inferredQna = inferQnaFromUtterances({
+            utterances: Array.isArray(rawUtterances)
+              ? rawUtterances.map((u: any) => ({
+                  transcript: u.transcript,
+                  speaker: u.speaker,
+                  start: u.start,
+                  end: u.end,
+                }))
+              : undefined,
+            fallbackText: transcriptEn.text,
+          });
+        }
+      } catch {
+        inferredQna = null;
+      }
+
       await this.dbConn.db
         .update(consultations)
         .set({
@@ -80,7 +107,12 @@ export class ConsultationProcessor extends WorkerHost {
           transcript: transcriptOriginal,
           normalizedTranscriptEn: transcriptEn,
           soapNote: note.soap,
-          aiInsights: note.insights,
+          aiInsights: inferredQna
+            ? {
+                ...(note.insights ?? {}),
+                inferredQna,
+              }
+            : note.insights,
           error: null,
         })
         .where(

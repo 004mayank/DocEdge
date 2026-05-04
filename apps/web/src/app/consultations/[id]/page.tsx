@@ -122,6 +122,27 @@ export default function ConsultationDetailPage({ params }: { params: { id: strin
           {JSON.stringify(c?.aiInsights ?? null, null, 2)}
         </pre>
       </section>
+
+      {c?.aiInsights?.inferredQna && (
+        <section className="mt-6 border rounded-xl p-4">
+          <h2 className="font-semibold">Doctor questions (inferred)</h2>
+          <p className="mt-2 text-sm text-gray-600">
+            Used when speaker diarization is unavailable (single mic / single speaker).
+          </p>
+          <ul className="mt-3 list-disc pl-5 text-sm space-y-2">
+            {(c.aiInsights.inferredQna.questions ?? []).map((q: string, idx: number) => (
+              <li key={idx}>{q}</li>
+            ))}
+          </ul>
+
+          <h3 className="font-semibold mt-6">Patient responses (inferred)</h3>
+          <ul className="mt-3 list-disc pl-5 text-sm space-y-2">
+            {(c.aiInsights.inferredQna.responses ?? []).map((r: string, idx: number) => (
+              <li key={idx}>{r}</li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }
