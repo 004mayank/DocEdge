@@ -292,8 +292,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
             levelRef.current = next;
 
             // Noise floor + gain
-            const minLevel = 0.06;
-            const gain = 2.2;
+            const minLevel = 0.12;
+            const gain = 4.0;
             const env = Math.max(minLevel, Math.min(1, next * gain));
             ctx.clearRect(0, 0, w, h);
 
@@ -323,7 +323,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
             ctx.beginPath();
             for (let i = 0; i < time.length; i++) {
               const v = (time[i] - 128) / 128; // -1..1
-              const y = mid + v * (h * 0.40) * env;
+              const y = mid + v * (h * 0.48) * env;
               const x = (i / (time.length - 1)) * w;
               if (i === 0) ctx.moveTo(x, y);
               else ctx.lineTo(x, y);
