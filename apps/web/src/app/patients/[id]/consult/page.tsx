@@ -21,6 +21,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const procRef = useRef<ScriptProcessorNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [state, setState] = useState<State>('idle');
   const [consultationId, setConsultationId] = useState<string | null>(null);
@@ -234,27 +235,82 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       proc.connect(audioCtx.destination);
 
       // Animate bars from analyser
-      const data = new Uint8Array(analyser.frequencyBinCount);
+      const freq = new Uint8Array(analyser.frequencyBinCount);
+      const time = new Uint8Array(analyser.fftSize);
       const loop = () => {
         const a = analyserRef.current;
         if (!a) return;
-        a.getByteFrequencyData(data);
+        a.getByteFrequencyData(freq);
         // Build 10 bars from low-mid frequencies
         const bars = 10;
         const out: number[] = [];
         for (let i = 0; i < bars; i++) {
-          const start = Math.floor((i * data.length) / bars);
-          const end = Math.floor(((i + 1) * data.length) / bars);
+          const start = Math.floor((i * freq.length) / bars);
+          const end = Math.floor(((i + 1) * freq.length) / bars);
           let sum = 0;
           let cnt = 0;
           for (let j = start; j < end; j++) {
-            sum += data[j];
+            sum += freq[j];
             cnt++;
           }
           // normalize 0..1
           out.push(Math.min(1, (sum / (cnt || 1)) / 255));
         }
         setMeter(out);
+
+        // Rolling waveform
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const dpr = window.devicePixelRatio || 1;
+          const cssW = canvas.clientWidth || 700;
+          const cssH = canvas.clientHeight || 80;
+          const w = Math.floor(cssW * dpr);
+          const h = Math.floor(cssH * dpr);
+          if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+          }
+
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            a.getByteTimeDomainData(time);
+            ctx.clearRect(0, 0, w, h);
+
+            // background
+            ctx.fillStyle = '#0b0f19';
+            ctx.fillRect(0, 0, w, h);
+
+            const mid = h / 2;
+            // flatline
+            ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+            ctx.lineWidth = 1 * dpr;
+            ctx.beginPath();
+            ctx.moveTo(0, mid);
+            ctx.lineTo(w, mid);
+            ctx.stroke();
+
+            // waveform gradient
+            const grad = ctx.createLinearGradient(0, 0, w, 0);
+            grad.addColorStop(0, '#22d3ee');
+            grad.addColorStop(0.5, '#a855f7');
+            grad.addColorStop(1, '#22d3ee');
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 2.5 * dpr;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+
+            ctx.beginPath();
+            for (let i = 0; i < time.length; i++) {
+              const v = time[i] / 128.0; // 0..2
+              const y = v * (h / 2);
+              const x = (i / (time.length - 1)) * w;
+              if (i === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+          }
+        }
+
         rafRef.current = requestAnimationFrame(loop);
       };
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -410,6 +466,14 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
           <div className="text-sm text-gray-700">State: {state}</div>
           {state === 'recording' && (
             <div className="flex items-center gap-3">
+              <div className="w-full max-w-xl">
+                <canvas
+                  ref={(el) => {
+                    canvasRef.current = el;
+                  }}
+                  className="w-full h-16 rounded-lg border border-white/10"
+                />
+              </div>
               <div className="flex items-end gap-1 h-6">
                 {meter.map((v, i) => (
                   <div
