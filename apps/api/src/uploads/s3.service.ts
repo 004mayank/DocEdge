@@ -3,12 +3,27 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { loadEnv } from '../config/env';
 
-function replaceUrlOrigin(url: string, newOrigin: string) {
-  const u = new URL(url);
-  const o = new URL(newOrigin);
+function buildPublicPresignUrl(params: {
+  signedUrl: string;
+  publicEndpoint: string;
+  signedHost: string;
+}) {
+  const u = new URL(params.signedUrl);
+  const o = new URL(params.publicEndpoint);
+
+  // SigV4 signs the host header. If we change the host *and* send a different
+  // Host header, MinIO/S3 will reject with SignatureDoesNotMatch.
+  //
+  // We keep a browser-reachable origin, but we also return the exact host that
+  // must be used in the request Host header.
   u.protocol = o.protocol;
   u.host = o.host;
-  return u.toString();
+  return {
+    url: u.toString(),
+    // For axios/fetch callers: set `Host` header to the originally-signed host.
+    // (Browsers may restrict setting Host; in that case use a reverse proxy.)
+    signedHost: params.signedHost,
+  };
 }
 
 @Injectable()
@@ -35,21 +50,31 @@ export class S3Service {
       ContentType: params.contentType,
     });
 
-    let url = await getSignedUrl(this.client, cmd, {
+    const signedUrl = await getSignedUrl(this.client, cmd, {
       expiresIn: params.expiresInSeconds ?? 60 * 10,
     });
 
-    // If running in Docker, the S3 endpoint used by the server might be an
-    // internal hostname (e.g., http://minio:9000) that browsers can't reach.
-    // Rewrite the origin for client-facing uploads when configured.
+    let url = signedUrl;
+    let headers: Record<string, string> = { 'content-type': params.contentType };
+
     if (this.env.S3_PUBLIC_ENDPOINT) {
-      url = replaceUrlOrigin(url, this.env.S3_PUBLIC_ENDPOINT);
+      const signedHost = new URL(signedUrl).host;
+      const pub = buildPublicPresignUrl({
+        signedUrl,
+        publicEndpoint: this.env.S3_PUBLIC_ENDPOINT,
+        signedHost,
+      });
+      url = pub.url;
+      // NOTE: Setting Host header is not allowed in browsers. For browsers,
+      // use a reverse proxy so the URL host matches the signed host.
+      // We still return this for non-browser clients and for debugging.
+      headers = { ...headers, host: pub.signedHost };
     }
 
     return {
       url,
       method: 'PUT',
-      headers: { 'content-type': params.contentType },
+      headers,
       key: params.key,
       bucket: this.env.S3_BUCKET,
       expiresInSeconds: params.expiresInSeconds ?? 600,
