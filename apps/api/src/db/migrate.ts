@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { existsSync } from 'fs';
 import { loadEnv } from '../config/env';
 
 async function ensureMigrationsTable(pool: Pool) {
@@ -31,10 +32,14 @@ export async function runMigrations() {
   try {
     await ensureMigrationsTable(pool);
 
-    // In dist build, __dirname is dist/src/db.
-    // We copy migrations to /app/drizzle in the container, which resolves here:
-    // dist/src/db -> dist/src -> dist -> (project root)
-    const dir = path.resolve(__dirname, '../../../drizzle');
+    // ts-node: __dirname = src/db   → ../../drizzle = apps/api/drizzle ✓
+    // dist:    __dirname = dist/src/db → ../../../drizzle = /app/drizzle (Docker) ✓
+    const candidates = [
+      path.resolve(__dirname, '../../drizzle'),
+      path.resolve(__dirname, '../../../drizzle'),
+    ];
+    const dir = candidates.find(existsSync);
+    if (!dir) throw new Error(`Migrations folder not found. Tried: ${candidates.join(', ')}`);
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const files = entries
       .filter((e) => e.isFile() && e.name.endsWith('.sql'))

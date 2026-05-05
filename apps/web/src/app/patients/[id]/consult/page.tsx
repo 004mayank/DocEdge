@@ -5,16 +5,45 @@ import { api } from '@/lib/api';
 import { loadToken } from '@/lib/auth';
 import { io, Socket } from 'socket.io-client';
 import { getApiOrigin } from '@/lib/api';
+import { Sidebar } from '@/components/Sidebar';
 
 type State = 'idle' | 'recording' | 'uploading' | 'processing' | 'done' | 'error';
+
+type ChatSegment = { id: number; speaker: number; text: string };
+
+type LiveInsight = { type: 'symptom' | 'history'; title: string; desc: string };
+
+const SYMPTOM_CUES: [string, string, string][] = [
+  ['chest', 'Chest Tightness', 'Patient reports chest-related symptoms'],
+  ['pain', 'Pain Reported', 'Patient mentions pain or discomfort'],
+  ['fatigue', 'Fatigue', 'Patient reports tiredness or fatigue'],
+  ['breath', 'Breathing Difficulty', 'Respiratory symptoms mentioned'],
+  ['fever', 'Elevated Temperature', 'Fever or high temperature mentioned'],
+  ['headache', 'Headache', 'Patient reports headache'],
+  ['nausea', 'Nausea / Vomiting', 'GI symptoms mentioned'],
+  ['dizzy', 'Dizziness', 'Patient reports dizziness or vertigo'],
+  ['cough', 'Cough', 'Persistent cough mentioned'],
+  ['sugar', 'Blood Sugar', 'Diabetes or sugar level mentioned'],
+  ['bp', 'Blood Pressure', 'Blood pressure concern mentioned'],
+  ['allerg', 'Allergy', 'Allergy mentioned'],
+];
+
+const SOAP_TEMPLATES = [
+  'Standard General Consultation',
+  'Cardiology Follow-up',
+  'Diabetes Management',
+  'Respiratory Assessment',
+  'Orthopaedic Consultation',
+  'Mental Health Check-in',
+];
 
 export default function ConsultPage({ params }: { params: { id: string } }) {
   const patientId = useMemo(() => params.id, [params.id]);
 
+  // ── Refs ───────────────────────────────────────────────────────
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const socketRef = useRef<Socket | null>(null);
-  const audioSeqRef = useRef<number>(0);
   const startedAtRef = useRef<number | null>(null);
   const intervalRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -25,88 +54,106 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const levelRef = useRef<number>(0);
   const historyRef = useRef<number[]>([]);
   const lastTsRef = useRef<number>(0);
+  const pausedRef = useRef(false);
+  const segIdRef = useRef(0);
+  const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
+  // ── State ──────────────────────────────────────────────────────
   const [state, setState] = useState<State>('idle');
+  const [patient, setPatient] = useState<any>(null);
   const [consultationId, setConsultationId] = useState<string | null>(null);
   const [message, setMessage] = useState<string>('');
   const [inputLanguage, setInputLanguage] = useState<'en' | 'hi' | 'hi-en'>('en');
   const [soap, setSoap] = useState<any>(null);
   const [insights, setInsights] = useState<any>(null);
   const [contentType, setContentType] = useState<string>('audio/webm');
-  const [liveText, setLiveText] = useState<string>('');
+  const [chatSegments, setChatSegments] = useState<ChatSegment[]>([]);
+  const [partialText, setPartialText] = useState('');
   const [elapsedSec, setElapsedSec] = useState<number>(0);
-  const [meter, setMeter] = useState<number[]>(Array.from({ length: 10 }, () => 0));
+  const [paused, setPaused] = useState(false);
+  const [liveInsights, setLiveInsights] = useState<LiveInsight[]>([]);
+  const [prevArtifacts, setPrevArtifacts] = useState<any[]>([]);
+  const [soapTemplate, setSoapTemplate] = useState(SOAP_TEMPLATES[0]);
 
+  // ── On mount ───────────────────────────────────────────────────
   useEffect(() => {
     const t = loadToken();
-    if (!t) window.location.href = '/login';
+    if (!t) { window.location.href = '/login'; return; }
 
-    // Pick a stable recording mimeType for this browser.
-    const preferred = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/ogg;codecs=opus',
-    ];
-    const picked =
-      typeof MediaRecorder !== 'undefined'
-        ? preferred.find((t) => MediaRecorder.isTypeSupported(t))
-        : undefined;
+    const preferred = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+    const picked = typeof MediaRecorder !== 'undefined'
+      ? preferred.find(t => MediaRecorder.isTypeSupported(t))
+      : undefined;
     if (picked) setContentType(picked);
 
+    (async () => {
+      try {
+        const [p, as] = await Promise.all([
+          api.get(`/patients/${patientId}`),
+          api.get(`/patients/${patientId}/artifacts`),
+        ]);
+        setPatient(p.data);
+        setPrevArtifacts((as.data.items ?? []).filter((a: any) => a.kind !== 'audio'));
+      } catch {}
+    })();
+
     return () => {
-      try {
-        socketRef.current?.disconnect();
-      } catch {}
-      try {
-        procRef.current?.disconnect();
-      } catch {}
-      try {
-        audioCtxRef.current?.close();
-      } catch {}
+      try { socketRef.current?.disconnect(); } catch {}
+      try { procRef.current?.disconnect(); } catch {}
+      try { audioCtxRef.current?.close(); } catch {}
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, []);
+  }, [patientId]);
 
+  // ── Live insight extraction ───────────────────────────────────
+  useEffect(() => {
+    const text = chatSegments.map(s => s.text).join(' ').toLowerCase();
+    const found: LiveInsight[] = [];
+    for (const [term, title, desc] of SYMPTOM_CUES) {
+      if (text.includes(term) && !found.find(i => i.title === title)) {
+        found.push({ type: 'symptom', title, desc });
+      }
+    }
+    setLiveInsights(found);
+  }, [chatSegments]);
+
+  // ── Auto-scroll transcript ────────────────────────────────────
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatSegments, partialText]);
+
+  // ── Sync pause ref ────────────────────────────────────────────
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+
+  // ── Helpers ───────────────────────────────────────────────────
   function fmt(sec: number) {
-    const m = Math.floor(sec / 60)
-      .toString()
-      .padStart(2, '0');
-    const s = Math.floor(sec % 60)
-      .toString()
-      .padStart(2, '0');
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = Math.floor(sec % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   }
 
   function downsampleTo16k(float32: Float32Array, inSampleRate: number) {
-    const outSampleRate = 16000;
-    if (inSampleRate === outSampleRate) return float32;
-    const ratio = inSampleRate / outSampleRate;
+    if (inSampleRate === 16000) return float32;
+    const ratio = inSampleRate / 16000;
     const newLen = Math.round(float32.length / ratio);
     const result = new Float32Array(newLen);
-    let offsetResult = 0;
-    let offsetBuffer = 0;
-    while (offsetResult < result.length) {
-      const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
-      let accum = 0;
-      let count = 0;
-      for (let i = offsetBuffer; i < nextOffsetBuffer && i < float32.length; i++) {
-        accum += float32[i];
-        count++;
-      }
-      result[offsetResult] = accum / (count || 1);
-      offsetResult++;
-      offsetBuffer = nextOffsetBuffer;
+    let oR = 0, oB = 0;
+    while (oR < result.length) {
+      const next = Math.round((oR + 1) * ratio);
+      let sum = 0, cnt = 0;
+      for (let i = oB; i < next && i < float32.length; i++) { sum += float32[i]; cnt++; }
+      result[oR++] = sum / (cnt || 1);
+      oB = next;
     }
     return result;
   }
 
-  function floatTo16BitPCM(float32: Float32Array) {
-    const buf = new ArrayBuffer(float32.length * 2);
+  function floatTo16BitPCM(f32: Float32Array) {
+    const buf = new ArrayBuffer(f32.length * 2);
     const view = new DataView(buf);
-    for (let i = 0; i < float32.length; i++) {
-      let s = Math.max(-1, Math.min(1, float32[i]));
+    for (let i = 0; i < f32.length; i++) {
+      const s = Math.max(-1, Math.min(1, f32[i]));
       view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
     return new Uint8Array(buf);
@@ -114,30 +161,26 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
   function fail(err: any, fallback: string) {
     const msg =
-      err?.name === 'NotAllowedError'
-        ? 'Microphone permission denied. Allow mic access in your browser settings and try again.'
-        : err?.name === 'NotFoundError'
-          ? 'No microphone found. Connect/select an input device and try again.'
-          : err?.message ?? fallback;
+      err?.name === 'NotAllowedError' ? 'Microphone permission denied. Allow mic access and try again.'
+      : err?.name === 'NotFoundError' ? 'No microphone found.'
+      : err?.message ?? fallback;
     setState('error');
     setMessage(msg);
   }
 
+  // ── Start recording ───────────────────────────────────────────
   async function start() {
     try {
       setMessage('');
       setSoap(null);
       setInsights(null);
-      setLiveText('');
+      setChatSegments([]);
+      setPartialText('');
+      setPaused(false);
 
-      // Ask for mic access *before* creating a consultation, so we don't leave
-      // orphaned "active" consultations when the mic is unavailable.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const res = await api.post('/consultations/start', {
-        patientId,
-        inputLanguage,
-      });
+      const res = await api.post('/consultations/start', { patientId, inputLanguage });
       setConsultationId(res.data.id);
 
       const recorder = contentType
@@ -145,7 +188,6 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         : new MediaRecorder(stream);
       chunksRef.current = [];
 
-      // Realtime transcript: connect and wait for server 'ready' before sending audio.
       const sock = io(getApiOrigin() || window.location.origin, {
         path: '/ws',
         transports: ['websocket'],
@@ -154,221 +196,128 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
       const ready = new Promise<void>((resolve, reject) => {
         const t = setTimeout(() => reject(new Error('Realtime STT handshake timeout')), 8000);
-        sock.on('ready', () => {
-          clearTimeout(t);
-          resolve();
-        });
+        sock.on('ready', () => { clearTimeout(t); resolve(); });
       });
 
       sock.on('connect', () => {
-        sock.emit('start', {
-          mimetype: contentType || 'audio/webm',
-          language: inputLanguage,
-        });
+        sock.emit('start', { mimetype: contentType || 'audio/webm', language: inputLanguage });
       });
-      sock.on('connect_error', (e: any) => {
-        setMessage(`Realtime connect error: ${e?.message ?? e}`);
+      sock.on('connect_error', (e: any) => setMessage(`Connect error: ${e?.message ?? e}`));
+
+      sock.on('partial', (p: any) => {
+        setPartialText(p?.text ?? '');
       });
-      sock.on('disconnect', (reason: any) => {
-        setMessage(`Realtime disconnected: ${reason}`);
-      });
-      const renderSegments = (p: any) => {
-        if (Array.isArray(p?.segments) && p.segments.length) {
-          const lines = p.segments
-            .map((s: any) =>
-              s.speaker === -1
-                ? `[${s.text}]`
-                : `Speaker ${s.speaker}: ${s.text}`,
-            )
-            .join('\n');
-          setLiveText(lines);
-        } else if (typeof p?.text === 'string') {
-          // Fast path: show interim transcript even if diarization segments aren't ready.
-          setLiveText(p.text);
+
+      sock.on('final', (p: any) => {
+        const segs: Array<{ speaker: number; text: string }> = p?.segments ?? [];
+        if (segs.length) {
+          const valid = segs.filter((s: any) => s.speaker !== -1 && s.text?.trim());
+          if (valid.length) {
+            setChatSegments(prev => [
+              ...prev,
+              ...valid.map((s: any) => ({ id: segIdRef.current++, speaker: s.speaker ?? 0, text: s.text })),
+            ]);
+          } else if (p?.text?.trim()) {
+            setChatSegments(prev => [...prev, { id: segIdRef.current++, speaker: 0, text: p.text }]);
+          }
+        } else if (p?.text?.trim()) {
+          setChatSegments(prev => [...prev, { id: segIdRef.current++, speaker: 0, text: p.text }]);
         }
-      };
-
-      sock.on('partial', renderSegments);
-      sock.on('final', renderSegments);
-      sock.on('error', (e: any) => {
-        // Keep recording even if realtime STT hiccups
-        const msg = e?.message ? `Realtime STT: ${e.message}` : 'Realtime STT error';
-        setMessage(msg);
+        setPartialText('');
       });
 
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
+      sock.on('error', (e: any) => setMessage(e?.message ? `Realtime STT: ${e.message}` : 'Realtime STT error'));
 
-      recorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-      };
+      recorder.ondataavailable = (e) => { if (e.data?.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => stream.getTracks().forEach(t => t.stop());
 
       await ready;
 
-      // Start PCM realtime streaming (linear16 @ 16kHz mono)
+      // AudioContext for PCM streaming + analyser
       const AudioCtx = (window.AudioContext || (window as any).webkitAudioContext) as any;
       const audioCtx: AudioContext = new AudioCtx();
       audioCtxRef.current = audioCtx;
       const src = audioCtx.createMediaStreamSource(stream);
 
-      // Listening meter
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.85;
       analyserRef.current = analyser;
       src.connect(analyser);
 
-      // Smaller buffer => lower latency for realtime captions.
       const proc = audioCtx.createScriptProcessor(1024, 1, 1);
       procRef.current = proc;
-
       proc.onaudioprocess = (evt) => {
+        if (pausedRef.current) return;
         const input = evt.inputBuffer.getChannelData(0);
         const down = downsampleTo16k(input, audioCtx.sampleRate);
         const pcm16 = floatTo16BitPCM(down);
         const s = socketRef.current;
-        if (s && s.connected) {
-          audioSeqRef.current += 1;
-          s.emit('audio', pcm16);
-        }
+        if (s?.connected) s.emit('audio', pcm16);
       };
-
       src.connect(proc);
       proc.connect(audioCtx.destination);
 
-      // Animate bars + waveform from analyser
-      const freq = new Uint8Array(analyser.frequencyBinCount);
+      // Waveform animation
       const time = new Uint8Array(analyser.fftSize);
       const loop = () => {
         const a = analyserRef.current;
         if (!a) return;
-        a.getByteFrequencyData(freq);
-        // Build 10 bars from low-mid frequencies
-        const bars = 10;
-        const out: number[] = [];
-        for (let i = 0; i < bars; i++) {
-          const start = Math.floor((i * freq.length) / bars);
-          const end = Math.floor(((i + 1) * freq.length) / bars);
-          let sum = 0;
-          let cnt = 0;
-          for (let j = start; j < end; j++) {
-            sum += freq[j];
-            cnt++;
-          }
-          // normalize 0..1
-          out.push(Math.min(1, (sum / (cnt || 1)) / 255));
-        }
-        setMeter(out);
+        a.getByteTimeDomainData(time);
+        let sumSq = 0;
+        for (let i = 0; i < time.length; i++) { const v = (time[i] - 128) / 128; sumSq += v * v; }
+        const rms = Math.sqrt(sumSq / time.length);
+        const now = performance.now();
+        const dt = Math.max(0.001, (now - (lastTsRef.current || now)) / 1000);
+        lastTsRef.current = now;
+        const prev = levelRef.current || 0;
+        const coeff = rms > prev ? 1 - Math.exp(-dt / 0.12) : 1 - Math.exp(-dt / 1.4);
+        levelRef.current = prev + (rms - prev) * coeff;
+        const env = Math.max(0.08, Math.min(1, levelRef.current * 5.0));
+        const hist = historyRef.current;
+        hist.push(env);
+        if (hist.length > 120) hist.splice(0, hist.length - 120);
 
-        // Rolling waveform
         const canvas = canvasRef.current;
         if (canvas) {
           const dpr = window.devicePixelRatio || 1;
-          const cssW = canvas.clientWidth || 700;
-          const cssH = canvas.clientHeight || 80;
-          const w = Math.floor(cssW * dpr);
-          const h = Math.floor(cssH * dpr);
-          if (canvas.width !== w || canvas.height !== h) {
-            canvas.width = w;
-            canvas.height = h;
-          }
-
+          const cssW = canvas.clientWidth || 300;
+          const cssH = canvas.clientHeight || 40;
+          const w = Math.floor(cssW * dpr), h = Math.floor(cssH * dpr);
+          if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
           const ctx = canvas.getContext('2d');
           if (ctx) {
-            a.getByteTimeDomainData(time);
-
-            // Compute RMS level from time-domain data (0..1)
-            let sumSq = 0;
-            for (let i = 0; i < time.length; i++) {
-              const v = (time[i] - 128) / 128; // -1..1
-              sumSq += v * v;
-            }
-            const rms = Math.sqrt(sumSq / time.length);
-
-            // Time-aware attack/release with slow decay (so it doesn't flatline quickly)
-            const now = performance.now();
-            const dt = Math.max(0.001, (now - (lastTsRef.current || now)) / 1000);
-            lastTsRef.current = now;
-
-            const prev = levelRef.current || 0;
-            const attackTau = 0.12; // ~120ms
-            const releaseTau = 1.4; // ~1.4s
-            const attackA = 1 - Math.exp(-dt / attackTau);
-            const releaseA = 1 - Math.exp(-dt / releaseTau);
-            const coeff = rms > prev ? attackA : releaseA;
-            const next = prev + (rms - prev) * coeff;
-            levelRef.current = next;
-
-            // Visual envelope + history
-            const minLevel = 0.08;
-            const gain = 5.0;
-            const env = Math.max(minLevel, Math.min(1, next * gain));
-
-            const hist = historyRef.current;
-            hist.push(env);
-            const maxPoints = 240; // ~8s @ ~30fps
-            if (hist.length > maxPoints) hist.splice(0, hist.length - maxPoints);
-            ctx.clearRect(0, 0, w, h);
-
-            // background
-            ctx.fillStyle = '#0b0f19';
+            ctx.fillStyle = '#030712';
             ctx.fillRect(0, 0, w, h);
-
-            const mid = h / 2;
-            // flatline
-            ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-            ctx.lineWidth = 1 * dpr;
-            ctx.beginPath();
-            ctx.moveTo(0, mid);
-            ctx.lineTo(w, mid);
-            ctx.stroke();
-
-            // waveform gradient
             const grad = ctx.createLinearGradient(0, 0, w, 0);
-            grad.addColorStop(0, '#22d3ee');
-            grad.addColorStop(0.5, '#a855f7');
-            grad.addColorStop(1, '#22d3ee');
+            grad.addColorStop(0, '#93c5fd'); grad.addColorStop(0.5, '#c084fc'); grad.addColorStop(1, '#93c5fd');
             ctx.strokeStyle = grad;
-            ctx.lineWidth = (2.5 + env * 1.2) * dpr;
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-
-            // Scrolling envelope waveform (top + mirrored bottom)
-            const arr = historyRef.current;
-            const n = arr.length;
+            ctx.lineWidth = (1.5 + env * 1) * dpr;
+            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            const arr = historyRef.current, n = arr.length;
             ctx.beginPath();
             for (let i = 0; i < n; i++) {
               const x = n <= 1 ? 0 : (i / (n - 1)) * w;
-              const amp = arr[i];
-              const y = mid - (h * 0.38) * amp;
-              if (i === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
+              const y = (h / 2) - (h * 0.4) * arr[i];
+              i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
             }
             ctx.stroke();
-
-            ctx.globalAlpha = 0.55;
+            ctx.globalAlpha = 0.45;
             ctx.beginPath();
             for (let i = 0; i < n; i++) {
               const x = n <= 1 ? 0 : (i / (n - 1)) * w;
-              const amp = arr[i];
-              const y = mid + (h * 0.38) * amp;
-              if (i === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
+              const y = (h / 2) + (h * 0.4) * arr[i];
+              i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
             }
             ctx.stroke();
             ctx.globalAlpha = 1;
           }
         }
-
         rafRef.current = requestAnimationFrame(loop);
       };
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(loop);
 
-      // Emit chunks frequently for realtime STT.
       recorder.start(250);
       mediaRecorderRef.current = recorder;
       setState('recording');
@@ -377,85 +326,64 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       setElapsedSec(0);
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = setInterval(() => {
-        if (!startedAtRef.current) return;
-        setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
+        if (startedAtRef.current) setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
       }, 250);
     } catch (err: any) {
       fail(err, 'Failed to start recording');
     }
   }
 
+  // ── Stop recording ────────────────────────────────────────────
   async function stop() {
     try {
       if (!consultationId) return;
       const recorder = mediaRecorderRef.current;
       if (!recorder) return;
-
       setState('uploading');
 
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
+      if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
 
-      // Stop realtime
-      try {
-        socketRef.current?.emit('stop');
-        socketRef.current?.disconnect();
-      } catch {}
+      try { socketRef.current?.emit('stop'); socketRef.current?.disconnect(); } catch {}
 
-      await new Promise<void>((resolve) => {
-      recorder.onstop = () => resolve();
-      recorder.stop();
-    });
+      await new Promise<void>(resolve => {
+        recorder.onstop = () => resolve();
+        recorder.stop();
+      });
 
-    const blob = new Blob(chunksRef.current, { type: contentType || 'audio/webm' });
+      const blob = new Blob(chunksRef.current, { type: contentType || 'audio/webm' });
+      const ext = (contentType || 'audio/webm').includes('mp4') ? 'mp4' : 'webm';
 
-    const pres = await api.post('/uploads/presign', {
-      kind: 'audio',
-      patientId,
-      consultationId,
-      contentType: contentType || 'audio/webm',
-      originalName: `consultation-${consultationId}.${(contentType || 'audio/webm').includes('mp4') ? 'mp4' : 'webm'}`,
-    });
-
-    const presign = pres.data.presign;
-    const objectKey = pres.data.object.key;
-
-    await fetch(presign.url, {
-      method: 'PUT',
-      headers: { 'content-type': contentType || 'audio/webm' },
-      body: blob,
-    });
-
-    // Register artifact (optional but useful for timeline)
-    await api.post('/uploads/register', {
-      kind: 'audio',
-      patientId,
-      consultationId,
-      objectKey,
-      contentType: contentType || 'audio/webm',
-      originalName: `consultation-${consultationId}.${(contentType || 'audio/webm').includes('mp4') ? 'mp4' : 'webm'}`,
-    });
-
-    await api.post(`/consultations/${consultationId}/stop`, {
-      audioObjectKey: objectKey,
-      language: 'en',
-    });
+      const pres = await api.post('/uploads/presign', {
+        kind: 'audio', patientId, consultationId,
+        contentType: contentType || 'audio/webm',
+        originalName: `consultation-${consultationId}.${ext}`,
+      });
+      await fetch(pres.data.presign.url, {
+        method: 'PUT',
+        headers: { 'content-type': contentType || 'audio/webm' },
+        body: blob,
+      });
+      await api.post('/uploads/register', {
+        kind: 'audio', patientId, consultationId,
+        objectKey: pres.data.object.key,
+        contentType: contentType || 'audio/webm',
+        originalName: `consultation-${consultationId}.${ext}`,
+      });
+      await api.post(`/consultations/${consultationId}/stop`, {
+        audioObjectKey: pres.data.object.key,
+        language: 'en',
+      });
 
       setState('processing');
-      setMessage('Processing…');
+      setMessage('Generating SOAP note…');
 
-    // Poll status
       for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 1000));
         const s = await api.get(`/consultations/${consultationId}/status`);
         if (s.data.status === 'completed') break;
         if (s.data.status === 'failed') {
-          throw new Error(
-            s.data.error?.message ??
-              'Consultation processing failed (see server logs for details)',
-          );
+          throw new Error(s.data.error?.message ?? 'Processing failed');
         }
       }
 
@@ -463,126 +391,331 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       setSoap(full.data.soapNote);
       setInsights(full.data.aiInsights);
       setState('done');
-      setMessage('Done');
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      setMessage('');
       startedAtRef.current = null;
-
       analyserRef.current = null;
-      procRef.current = null;
-      audioCtxRef.current = null;
     } catch (err: any) {
-      fail(err, 'Failed to stop/upload/process consultation');
+      fail(err, 'Failed to stop/process consultation');
     }
   }
 
+  const isRecording = state === 'recording';
+  const mrn = `MRN-${patientId.slice(0, 8).toUpperCase()}`;
+
   return (
-    <main className="min-h-screen p-6 max-w-3xl mx-auto">
-      <a className="text-sm underline" href={`/patients/${patientId}`}>
-        ← Back to patient
-      </a>
+    <div className="flex h-screen bg-gray-50 overflow-hidden">
+      <Sidebar />
 
-      <h1 className="text-2xl font-semibold mt-3">Consultation</h1>
-      <p className="text-sm text-gray-600 mt-1">
-        Patient: <span className="font-mono">{patientId}</span>
-      </p>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* ── Patient header bar ────────────────────────── */}
+        <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center gap-4 shrink-0">
+          <a href={`/patients/${patientId}`} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </a>
 
-      <div className="mt-6 border rounded-xl p-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="text-sm">
-            Spoken language:&nbsp;
+          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-semibold text-xs shrink-0">
+            {patient?.fullName ? patient.fullName.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() : '…'}
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-gray-900 text-sm">{patient?.fullName ?? '…'}</span>
+              {patient && (
+                <>
+                  <span className="text-xs text-gray-400 font-mono bg-gray-50 border border-gray-100 rounded px-1.5 py-0.5">{mrn}</span>
+                  {isRecording && (
+                    <span className="text-xs bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5 font-medium">Active Session</span>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Language selector (only when idle) */}
+          {state === 'idle' && (
             <select
-              className="border rounded px-2 py-1"
+              className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-200"
               value={inputLanguage}
-              onChange={(e) => setInputLanguage(e.target.value as any)}
-              disabled={state === 'recording' || state === 'uploading' || state === 'processing'}
+              onChange={e => setInputLanguage(e.target.value as any)}
             >
               <option value="en">English</option>
               <option value="hi">Hindi</option>
               <option value="hi-en">Hinglish</option>
             </select>
-          </div>
-          <button
-            disabled={state !== 'idle' && state !== 'done' && state !== 'error'}
-            className="bg-black text-white rounded px-4 py-2 disabled:opacity-50"
-            onClick={start}
-          >
-            Start
-          </button>
-          <button
-            disabled={state !== 'recording'}
-            className="border rounded px-4 py-2 disabled:opacity-50"
-            onClick={stop}
-          >
-            Stop
-          </button>
-          <div className="text-sm text-gray-700">State: {state}</div>
-          {state === 'recording' && (
-            <div className="flex items-center gap-3">
-              <div className="w-full max-w-xl">
-                <canvas
-                  ref={(el) => {
-                    canvasRef.current = el;
-                  }}
-                  className="w-full h-16 rounded-lg border border-white/10"
-                />
-              </div>
-              <div className="text-base font-medium text-gray-800">
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse mr-2" />
-                Listening <span className="font-mono">{fmt(elapsedSec)}</span>
-              </div>
+          )}
+
+          {/* Live recording indicator (header badge only — no waveform here) */}
+          {isRecording && (
+            <div className="flex items-center gap-1.5 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Live Recording</span>
             </div>
           )}
         </div>
-        {consultationId && (
-          <div className="mt-3 text-sm text-gray-600">
-            Consultation ID: <span className="font-mono">{consultationId}</span>
-          </div>
-        )}
-        {message && <div className="mt-3 text-sm">{message}</div>}
-      </div>
 
-      <section className="mt-6 border rounded-xl p-4">
-        <h2 className="font-semibold">Live transcript</h2>
-        <p className="mt-2 text-sm text-gray-600">
-          Updates while recording (MVP). Final transcript is saved on Stop.
-        </p>
-        <div className="mt-3 text-sm whitespace-pre-wrap min-h-[80px]">
-          {liveText || (state === 'recording' ? 'Listening…' : '—')}
+        {/* ── Body: transcript + right panel ───────────── */}
+        <div className="flex-1 flex overflow-hidden">
+
+          {/* ── Left: transcript ─────────────────────────── */}
+          <div className="flex-1 flex flex-col overflow-hidden border-r border-gray-100">
+            <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between bg-white shrink-0">
+              <h2 className="font-semibold text-gray-900 text-sm">Live Transcript</h2>
+              {chatSegments.length > 0 && (
+                <span className="text-xs text-gray-400">{chatSegments.length} utterances</span>
+              )}
+            </div>
+
+            {/* Waveform + timer strip — pinned, visible throughout the recording */}
+            {isRecording && (
+              <div className="bg-gray-950 px-5 py-3 flex items-center gap-4 shrink-0 border-b border-gray-800">
+                <canvas
+                  ref={el => { canvasRef.current = el; }}
+                  className="flex-1 rounded"
+                  style={{ height: '52px' }}
+                />
+                <div className="shrink-0 text-right">
+                  <div className="text-2xl font-mono font-bold text-white leading-none tracking-tight">
+                    {fmt(elapsedSec)}
+                  </div>
+                  <div className="text-xs text-gray-500 uppercase tracking-widest mt-1">
+                    {paused ? 'Paused' : 'Duration'}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Chat bubbles */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              {state === 'idle' && chatSegments.length === 0 && soap === null && (
+                <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
+                  <svg className="mb-3" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <p className="text-sm font-medium text-gray-500">Ready to record</p>
+                  <p className="text-xs mt-1">Press Start Recording to begin the consultation</p>
+                </div>
+              )}
+
+              {chatSegments.map(seg => (
+                <div key={seg.id} className="space-y-0.5">
+                  <div className={`text-xs font-semibold uppercase tracking-wider ${seg.speaker === 0 ? 'text-blue-700' : 'text-gray-500'}`}>
+                    {seg.speaker === 0 ? 'Doctor' : 'Patient'}
+                  </div>
+                  <div className={`inline-block max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${
+                    seg.speaker === 0
+                      ? 'bg-white border border-gray-100 text-gray-800 shadow-sm'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {seg.text}
+                  </div>
+                  <div className="text-xs text-gray-300">{new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+                </div>
+              ))}
+
+              {/* Partial / typing indicator */}
+              {isRecording && partialText && (
+                <div className="space-y-0.5 opacity-60">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">Speaking…</div>
+                  <div className="inline-block max-w-[85%] bg-gray-50 border border-dashed border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-500 italic">
+                    {partialText}
+                  </div>
+                </div>
+              )}
+
+              {isRecording && !partialText && chatSegments.length === 0 && (
+                <div className="flex items-center gap-2 text-gray-400 text-sm">
+                  <span className="flex gap-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
+                  Listening…
+                </div>
+              )}
+
+              {(state === 'uploading' || state === 'processing') && (
+                <div className="flex items-center gap-3 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-700">
+                  <svg className="animate-spin shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  {state === 'uploading' ? 'Uploading audio…' : message || 'Generating SOAP note…'}
+                </div>
+              )}
+
+              {state === 'error' && (
+                <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-700">{message}</div>
+              )}
+
+              {/* SOAP result */}
+              {soap && (
+                <div className="mt-4 bg-white border border-emerald-100 rounded-xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    <span className="text-sm font-semibold text-emerald-800">SOAP Note Generated</span>
+                  </div>
+                  <div className="p-4 grid gap-3 text-sm">
+                    {(['subjective', 'objective', 'assessment', 'plan'] as const).map(k => (
+                      soap[k] ? (
+                        <div key={k}>
+                          <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">{k}</div>
+                          <div className="text-gray-700 leading-relaxed">{soap[k]}</div>
+                        </div>
+                      ) : null
+                    ))}
+                  </div>
+                  <div className="px-4 pb-4">
+                    <a
+                      href={`/consultations/${consultationId}`}
+                      className="text-xs text-blue-700 hover:text-blue-900 font-medium"
+                    >
+                      Open full consultation →
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              <div ref={chatBottomRef} />
+            </div>
+
+            {/* ── Bottom action bar ─────────────────────── */}
+            <div className="bg-white border-t border-gray-100 px-5 py-4 shrink-0">
+              {state === 'idle' || state === 'done' || state === 'error' ? (
+                <button
+                  onClick={start}
+                  className="w-full flex items-center justify-center gap-2 bg-blue-900 hover:bg-blue-800 text-white font-semibold rounded-xl px-6 py-3 text-sm transition-colors"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
+                  </svg>
+                  {state === 'done' ? 'Start New Consultation' : 'Start Recording'}
+                </button>
+              ) : state === 'recording' ? (
+                <div className="flex gap-3">
+                  <button
+                    onClick={stop}
+                    className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl px-6 py-3 text-sm transition-colors"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                    </svg>
+                    End Session & Generate SOAP Note
+                  </button>
+                  <button
+                    onClick={() => setPaused(p => !p)}
+                    className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-medium border transition-colors ${
+                      paused
+                        ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {paused ? (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                        Resume
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+                        Pause
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* ── Right panel ──────────────────────────────── */}
+          <div className="w-72 shrink-0 overflow-y-auto bg-white flex flex-col divide-y divide-gray-50">
+
+            {/* Live AI Insights */}
+            <div className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+                <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Live AI Insights</h3>
+              </div>
+
+              {liveInsights.length === 0 ? (
+                <div className="text-xs text-gray-400 italic">
+                  {isRecording ? 'Analyzing conversation…' : 'Insights appear as you record'}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {liveInsights.slice(0, 4).map((ins, i) => (
+                    <div key={i} className="border-l-2 border-blue-400 bg-blue-50 rounded-r-lg px-3 py-2">
+                      <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide">{ins.type === 'symptom' ? 'Possible Symptom' : 'Relevant History'}</div>
+                      <div className="text-sm font-medium text-gray-800 mt-0.5">{ins.title}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{ins.desc}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Previous Records */}
+            <div className="p-4">
+              <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-3">Previous Records</h3>
+              {prevArtifacts.length === 0 ? (
+                <div className="text-xs text-gray-400">No records on file</div>
+              ) : (
+                <div className="space-y-2">
+                  {prevArtifacts.slice(0, 4).map(a => (
+                    <div key={a.id} className="flex items-center gap-2 text-xs">
+                      <svg className="text-gray-400 shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                      <span className="flex-1 truncate text-gray-700">{a.originalName ?? a.kind}</span>
+                      <span className="text-gray-400 shrink-0">
+                        {new Date(a.createdAt).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                  <a href={`/patients/${patientId}`} className="text-xs text-blue-700 hover:text-blue-900 font-medium block mt-1">
+                    View Full History →
+                  </a>
+                </div>
+              )}
+            </div>
+
+            {/* SOAP Template */}
+            <div className="p-4">
+              <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-3">SOAP Template</h3>
+              <select
+                className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={soapTemplate}
+                onChange={e => setSoapTemplate(e.target.value)}
+                disabled={state === 'recording' || state === 'processing'}
+              >
+                {SOAP_TEMPLATES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-2">AI formats the note based on this template.</p>
+            </div>
+
+            {/* AI insights after processing */}
+            {insights && (
+              <div className="p-4">
+                <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-3">Clinical Flags</h3>
+                {insights.warnings?.map((w: string, i: number) => (
+                  <div key={i} className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 mb-1">{w}</div>
+                ))}
+                {insights.actions?.map((a: any, i: number) => (
+                  <div key={i} className="text-xs text-gray-700 bg-gray-50 border border-gray-100 rounded px-2 py-1.5 mb-1">
+                    <span className="font-medium">{a.title}</span>
+                    {a.why ? <span className="text-gray-400"> — {a.why}</span> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </section>
-
-      {soap && (
-        <section className="mt-8 border rounded-xl p-4">
-          <h2 className="font-semibold">SOAP note</h2>
-          <div className="mt-3 grid gap-3 text-sm">
-            <div>
-              <div className="font-medium">Subjective</div>
-              <div className="text-gray-700 whitespace-pre-wrap">{soap.subjective}</div>
-            </div>
-            <div>
-              <div className="font-medium">Objective</div>
-              <div className="text-gray-700 whitespace-pre-wrap">{soap.objective}</div>
-            </div>
-            <div>
-              <div className="font-medium">Assessment</div>
-              <div className="text-gray-700 whitespace-pre-wrap">{soap.assessment}</div>
-            </div>
-            <div>
-              <div className="font-medium">Plan</div>
-              <div className="text-gray-700 whitespace-pre-wrap">{soap.plan}</div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {insights && (
-        <section className="mt-6 border rounded-xl p-4">
-          <h2 className="font-semibold">Insights (assistive)</h2>
-          <pre className="mt-3 text-xs overflow-auto bg-gray-50 p-3 rounded">
-            {JSON.stringify(insights, null, 2)}
-          </pre>
-        </section>
-      )}
-    </main>
+      </div>
+    </div>
   );
 }

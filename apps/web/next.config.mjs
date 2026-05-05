@@ -1,13 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async rewrites() {
-    // Same-origin API proxy:
-    // Browser calls http://localhost:3000/api/*
-    // Next server (inside Docker) forwards to the API service.
+    const apiOrigin =
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      (process.env.NODE_ENV === 'production' ? 'http://api:3002' : 'http://localhost:3002');
     return [
       {
         source: '/api/:path*',
-        destination: 'http://api:3001/:path*',
+        destination: `${apiOrigin}/:path*`,
       },
     ];
   },
