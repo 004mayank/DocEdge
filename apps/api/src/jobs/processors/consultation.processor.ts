@@ -94,16 +94,8 @@ export class ConsultationProcessor extends WorkerHost {
           if (s?.speaker) speakerSet.add(String(s.speaker));
         }
         if (speakerSet.size <= 1) {
-          const rawUtterances = (transcriptResult as any)?.raw?.utterances;
           inferredQna = inferQnaFromUtterances({
-            utterances: Array.isArray(rawUtterances)
-              ? rawUtterances.map((u: any) => ({
-                  transcript: u.transcript,
-                  speaker: u.speaker,
-                  start: u.start,
-                  end: u.end,
-                }))
-              : undefined,
+            utterances: undefined,
             fallbackText: transcriptEn.text,
           });
         }
