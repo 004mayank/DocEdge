@@ -45,21 +45,24 @@ export class ConsultationProcessor extends WorkerHost {
 
       if (hasRealtimeTranscript) {
         rawSegments = storedSegments;
-      } else {
-        if (!c.audioObjectKey) {
-          throw new Error('No realtime transcript and no audio file to transcribe');
+      } else if (c.audioObjectKey) {
+        // Fallback: batch-transcribe the uploaded audio
+        try {
+          const audio = await this.s3get.getObjectBuffer(c.audioObjectKey);
+          const sttLang = inputLang === 'hi-en' ? undefined : inputLang;
+          const transcriptResult = await this.deepgram.transcribe({
+            audioBuffer: audio.buffer,
+            mimetype: audio.contentType ?? 'application/octet-stream',
+            language: sttLang,
+          });
+          rawSegments = transcriptResult.segments ?? [];
+        } catch (sttErr: any) {
+          // Batch STT failed — proceed with empty transcript so SOAP still generates
+          rawSegments = [];
         }
-
-        const audio = await this.s3get.getObjectBuffer(c.audioObjectKey);
-        const sttLang = inputLang === 'hi-en' ? undefined : inputLang;
-
-        const transcriptResult = await this.deepgram.transcribe({
-          audioBuffer: audio.buffer,
-          mimetype: audio.contentType ?? 'application/octet-stream',
-          language: sttLang,
-        });
-
-        rawSegments = transcriptResult.segments ?? [];
+      } else {
+        // No transcript and no audio — generate SOAP from empty transcript
+        rawSegments = [];
       }
 
       // ── Step 2: AI-based speaker re-attribution ────────────────────

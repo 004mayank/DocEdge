@@ -57,6 +57,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const startRef = useRef<(() => void) | null>(null);
   const chatSegmentsRef = useRef<ChatSegment[]>([]);
+  const partialTextRef = useRef<string>('');
 
   // ── State ──────────────────────────────────────────────────────
   const [state, setState] = useState<State>('idle');
@@ -132,6 +133,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   // ── Sync refs ─────────────────────────────────────────────────
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { chatSegmentsRef.current = chatSegments; }, [chatSegments]);
+  useEffect(() => { partialTextRef.current = partialText; }, [partialText]);
 
   // ── Helpers ───────────────────────────────────────────────────
   function fmt(sec: number) {
@@ -344,13 +346,18 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         originalName: `consultation-${consultationId}.${ext}`,
       });
       const segs = chatSegmentsRef.current;
+      const partial = partialTextRef.current?.trim();
+      // Include in-flight partial as a segment if no finals were captured yet
+      const allSegs = segs.length > 0
+        ? segs
+        : partial ? [{ id: -1, speaker: 0, text: partial }] : [];
       await api.post(`/consultations/${consultationId}/stop`, {
         audioObjectKey: pres.data.object.key,
         language: 'en',
-        realtimeTranscript: segs.length > 0
+        realtimeTranscript: allSegs.length > 0
           ? {
-              segments: segs.map(s => ({ speaker: s.speaker, text: s.text })),
-              text: segs.map(s => s.text).join(' '),
+              segments: allSegs.map(s => ({ speaker: s.speaker, text: s.text })),
+              text: allSegs.map(s => s.text).join(' '),
             }
           : undefined,
       });
