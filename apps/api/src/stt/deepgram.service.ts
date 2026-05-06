@@ -19,11 +19,14 @@ export class DeepgramService {
     url.searchParams.set('diarize', 'true');
     if (params.language) url.searchParams.set('language', params.language);
 
+    // Strip codec parameters — Deepgram batch API only accepts base MIME types
+    const baseMime = params.mimetype.split(';')[0].trim();
+
     const res = await fetch(url.toString(), {
       method: 'POST',
       headers: {
         authorization: `Token ${this.env.DEEPGRAM_API_KEY}`,
-        'content-type': params.mimetype,
+        'content-type': baseMime,
       },
       // Node fetch types are stricter than undici request; Uint8Array satisfies BodyInit.
       body: new Uint8Array(params.audioBuffer),
