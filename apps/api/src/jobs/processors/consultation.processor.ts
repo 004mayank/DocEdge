@@ -34,26 +34,37 @@ export class ConsultationProcessor extends WorkerHost {
     if (!c) return;
 
     try {
-      if (!c.audioObjectKey) {
-        throw new Error('Missing audioObjectKey for consultation');
-      }
-
-      const audio = await this.s3get.getObjectBuffer(c.audioObjectKey);
       const inputLang = (c.inputLanguage as string) || 'en';
 
-      const sttLang = inputLang === 'hi-en' ? undefined : inputLang;
+      // Use the realtime transcript saved at stop-time if segments are available.
+      // Fall back to Deepgram batch transcription only if there is no realtime transcript.
+      const storedSegments: any[] = (c.transcript as any)?.segments ?? [];
+      const hasRealtimeTranscript = storedSegments.length > 0;
 
-      const transcriptResult = await this.deepgram.transcribe({
-        audioBuffer: audio.buffer,
-        mimetype: audio.contentType ?? 'application/octet-stream',
-        language: sttLang,
-      });
+      let transcriptOriginal: any;
 
-      const transcriptOriginal = {
-        language: inputLang,
-        segments: transcriptResult.segments,
-        text: transcriptResult.text,
-      };
+      if (hasRealtimeTranscript) {
+        transcriptOriginal = c.transcript;
+      } else {
+        if (!c.audioObjectKey) {
+          throw new Error('No realtime transcript and no audio file to transcribe');
+        }
+
+        const audio = await this.s3get.getObjectBuffer(c.audioObjectKey);
+        const sttLang = inputLang === 'hi-en' ? undefined : inputLang;
+
+        const transcriptResult = await this.deepgram.transcribe({
+          audioBuffer: audio.buffer,
+          mimetype: audio.contentType ?? 'application/octet-stream',
+          language: sttLang,
+        });
+
+        transcriptOriginal = {
+          language: inputLang,
+          segments: transcriptResult.segments,
+          text: transcriptResult.text,
+        };
+      }
 
       let transcriptEn = transcriptOriginal;
       if (inputLang !== 'en') {

@@ -58,7 +58,11 @@ export class ConsultationsService {
   async stop(
     user: AuthUser,
     consultationId: string,
-    dto: { audioObjectKey: string; language?: string },
+    dto: {
+      audioObjectKey: string;
+      language?: string;
+      realtimeTranscript?: { segments?: Array<{ speaker: number; text: string }>; text?: string };
+    },
   ) {
     const rows = await this.dbConn.db
       .select()
@@ -75,13 +79,24 @@ export class ConsultationsService {
     if (c.status !== 'active')
       throw new ForbiddenException('Consultation not active');
 
+    const transcriptToSave = dto.realtimeTranscript?.segments?.length
+      ? {
+          language: dto.language ?? 'en',
+          segments: dto.realtimeTranscript.segments.map(s => ({
+            speaker: s.speaker === 0 ? 'doctor' : 'patient',
+            text: s.text,
+          })),
+          text: dto.realtimeTranscript.text ?? dto.realtimeTranscript.segments.map(s => s.text).join(' '),
+        }
+      : { language: dto.language ?? 'en', segments: [] };
+
     const updated = await this.dbConn.db
       .update(consultations)
       .set({
         status: 'processing',
         endedAt: new Date(),
         audioObjectKey: dto.audioObjectKey,
-        transcript: { language: dto.language ?? 'en', segments: [] },
+        transcript: transcriptToSave,
       })
       .where(
         and(

@@ -11,6 +11,12 @@ const StartSchema = z.object({
 const StopSchema = z.object({
   audioObjectKey: z.string().min(1),
   language: z.string().optional(),
+  realtimeTranscript: z
+    .object({
+      segments: z.array(z.object({ speaker: z.number(), text: z.string() })).optional(),
+      text: z.string().optional(),
+    })
+    .optional(),
 });
 
 @Controller('consultations')
