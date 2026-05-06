@@ -441,7 +441,10 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
           {/* ── Left: transcript ─────────────────────────── */}
           <div className="flex-1 flex flex-col overflow-hidden border-r border-gray-100">
             <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between bg-white shrink-0">
-              <h2 className="font-semibold text-gray-900 text-sm">Live Transcript</h2>
+              <div>
+                <h2 className="font-semibold text-gray-900 text-sm">Live Transcript</h2>
+                {isRecording && <p className="text-xs text-gray-400 mt-0.5">Doctor &amp; Patient labels assigned after session ends</p>}
+              </div>
               {chatSegments.length > 0 && (
                 <span className="text-xs text-gray-400">{chatSegments.length} utterances</span>
               )}
@@ -492,13 +495,13 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
               {chatSegments.map(seg => (
                 <div key={seg.id} className="space-y-0.5">
-                  <div className={`text-xs font-semibold uppercase tracking-wider ${seg.speaker === 0 ? 'text-blue-700' : 'text-gray-500'}`}>
-                    {seg.speaker === 0 ? 'Doctor' : 'Patient'}
+                  <div className={`text-xs font-semibold uppercase tracking-wider ${seg.speaker === 0 ? 'text-blue-700' : 'text-violet-600'}`}>
+                    Speaker {seg.speaker + 1}
                   </div>
                   <div className={`inline-block max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${
                     seg.speaker === 0
                       ? 'bg-white border border-gray-100 text-gray-800 shadow-sm'
-                      : 'bg-gray-100 text-gray-800'
+                      : 'bg-violet-50 border border-violet-100 text-gray-800'
                   }`}>
                     {seg.text}
                   </div>

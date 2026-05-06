@@ -36,8 +36,8 @@ export class DeepgramRealtimeClient {
     url.searchParams.set('interim_results', 'true');
     url.searchParams.set('diarize', 'true');
     // utterances=true adds 1-3s delay — removed. Use is_final from Results instead.
-    // Lower endpointing for faster sentence commits (150ms silence = end of utterance).
-    url.searchParams.set('endpointing', '150');
+    // 400ms endpointing: allows natural mid-sentence pauses without fragmentation.
+    url.searchParams.set('endpointing', '400');
     // Realtime streaming works best with raw PCM.
     url.searchParams.set('encoding', 'linear16');
     url.searchParams.set('sample_rate', '16000');
