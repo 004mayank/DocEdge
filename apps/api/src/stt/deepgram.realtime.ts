@@ -11,7 +11,6 @@ export type DeepgramRealtimeTranscriptEvent = {
   transcript: string;
   // diarization per word when available
   words?: Array<{ word: string; speaker?: number; start?: number; end?: number }>;
-  utterances?: Array<{ transcript: string; speaker?: number; start?: number; end?: number }>;
   raw: any;
 };
 
@@ -36,11 +35,9 @@ export class DeepgramRealtimeClient {
     url.searchParams.set('smart_format', 'true');
     url.searchParams.set('interim_results', 'true');
     url.searchParams.set('diarize', 'true');
-    url.searchParams.set('utterances', 'true');
-    url.searchParams.set('vad_events', 'true');
-    // Lower endpointing improves realtime caption latency.
-    // (Diarization remains best-effort and may lag behind.)
-    url.searchParams.set('endpointing', '300');
+    // utterances=true adds 1-3s delay — removed. Use is_final from Results instead.
+    // Lower endpointing for faster sentence commits (150ms silence = end of utterance).
+    url.searchParams.set('endpointing', '150');
     // Realtime streaming works best with raw PCM.
     url.searchParams.set('encoding', 'linear16');
     url.searchParams.set('sample_rate', '16000');
@@ -68,22 +65,23 @@ export class DeepgramRealtimeClient {
         if (!dataStr) return;
         const msg = JSON.parse(dataStr);
 
-        // Deepgram emits various message types.
+        // Only handle Results messages (have channel.alternatives).
+        // Skip UtteranceEnd / SpeechStarted / Metadata etc.
         const alt = msg?.channel?.alternatives?.[0];
-        const transcript = alt?.transcript ?? '';
-        const words = alt?.words;
-        const utterances = msg?.utterances;
+        if (!alt) return;
+
+        const transcript = alt.transcript ?? '';
+        if (!transcript) return;
+
+        const words = alt.words;
         const isFinal = Boolean(msg?.is_final || msg?.speech_final);
 
-        if (transcript || (Array.isArray(utterances) && utterances.length)) {
-          this.onTranscript?.({
-            isFinal,
-            transcript,
-            words,
-            utterances,
-            raw: msg,
-          });
-        }
+        this.onTranscript?.({
+          isFinal,
+          transcript,
+          words,
+          raw: msg,
+        });
       } catch {
         // ignore
       }

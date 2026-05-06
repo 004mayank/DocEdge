@@ -10,15 +10,16 @@ import { DeepgramService } from '../stt/deepgram.service';
 import { DeepgramRealtimeClient } from '../stt/deepgram.realtime';
 import { Logger } from '@nestjs/common';
 
-// Minimal realtime gateway.
+// Realtime gateway.
 // Client protocol (Socket.IO):
 // - emit('start', { language?: 'en'|'hi'|'hi-en', mimetype: string })
 // - emit('audio', <binary chunk>) repeatedly
 // - emit('stop')
 // Server emits:
+// - 'ready'
 // - 'partial' { text: string }
-// - 'final' { text: string }
-// - 'error' { message: string }
+// - 'final'   { text: string, segments: [{speaker: number, text: string}] }
+// - 'error'   { message: string }
 
 @WebSocketGateway({
   path: '/ws',
@@ -52,54 +53,20 @@ export class RealtimeGateway {
 
     this.logger.log(`start socket=${socket.id} mimetype=${mimetype} lang=${language ?? ''}`);
 
-    // Create session and ACK immediately so the client can start streaming.
     const dg = new DeepgramRealtimeClient({ mimetype, language });
-    this.sessions.set(socket.id, {
-      chunks: [],
-      mimetype,
-      language,
-      dg,
-    });
+    this.sessions.set(socket.id, { chunks: [], mimetype, language, dg });
     socket.emit('ready', { ok: true });
 
-    // Connect to Deepgram asynchronously. If it fails, report to client.
     (async () => {
       try {
         await dg.connect((evt) => {
-          if (evt.transcript) {
-            this.logger.log(
-              `dg transcript socket=${socket.id} final=${evt.isFinal} chars=${evt.transcript.length}`,
-            );
-          }
-          // Prefer utterance-level diarization if available (more stable than word grouping)
+          // Build speaker-labelled segments from word-level diarization.
+          // Each run of consecutive words with the same speaker becomes a segment.
           const segments: Array<{ speaker: number; text: string }> = [];
-          if (Array.isArray(evt.utterances) && evt.utterances.length) {
-            // Basic overlap handling: if we see multiple speakers in the same callback,
-            // treat it as potential overlap and add an explicit marker segment.
-            const speakerSet = new Set<number>();
-            for (const u of evt.utterances) {
-              if (typeof u?.speaker === 'number') speakerSet.add(u.speaker);
-            }
-            const overlap = speakerSet.size > 1;
+          const words = evt.words ?? [];
 
-            if (overlap) {
-              segments.push({
-                speaker: -1,
-                text: 'Overlapping speech detected',
-              });
-            }
-
-            for (const u of evt.utterances) {
-              if (!u?.transcript) continue;
-              segments.push({
-                speaker: typeof u.speaker === 'number' ? u.speaker : 0,
-                text: u.transcript,
-              });
-            }
-          } else {
-            const words = evt.words ?? [];
+          if (words.length > 0) {
             let cur: { speaker: number; text: string } | null = null;
-
             for (const w of words) {
               const sid = typeof w.speaker === 'number' ? w.speaker : 0;
               const token = w.word;
@@ -112,20 +79,21 @@ export class RealtimeGateway {
               }
             }
             if (cur) segments.push(cur);
+          } else if (evt.transcript) {
+            // No word-level data — emit as speaker 0 (will be re-attributed by AI on save)
+            segments.push({ speaker: 0, text: evt.transcript });
           }
 
           socket.emit(evt.isFinal ? 'final' : 'partial', {
             text: evt.transcript,
-            segments,
+            segments: evt.isFinal ? segments : [],
             isFinal: evt.isFinal,
           });
         });
 
         this.logger.log(`deepgram connected socket=${socket.id}`);
       } catch (e: any) {
-        this.logger.error(
-          `deepgram connect failed socket=${socket.id} err=${e?.message ?? e}`,
-        );
+        this.logger.error(`deepgram connect failed socket=${socket.id} err=${e?.message ?? e}`);
         socket.emit('error', {
           message: `Deepgram realtime connect failed: ${e?.message ?? e}`,
         });
@@ -140,16 +108,10 @@ export class RealtimeGateway {
       socket.emit('error', { message: 'Session not started' });
       return;
     }
-    // Socket.IO delivers binary as Buffer on Node.
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
     s.chunks.push(buf);
 
-    if (s.chunks.length === 1) {
-      this.logger.log(`first audio socket=${socket.id} bytes=${buf.length}`);
-    }
-
     try {
-      // If deepgram isn't connected yet, drop audio silently (client will keep sending).
       if (s.dg && !s.dg.isConnected()) return;
       s.dg?.sendAudio(new Uint8Array(buf));
     } catch (e: any) {
@@ -163,7 +125,6 @@ export class RealtimeGateway {
     const s = this.sessions.get(socket.id);
     if (!s) return;
     this.sessions.delete(socket.id);
-
     try {
       await s.dg?.close();
     } catch (e: any) {

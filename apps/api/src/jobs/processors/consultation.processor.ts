@@ -8,7 +8,6 @@ import { AiService } from '../../ai/ai.service';
 import { TranslateService } from '../../ai/translate.service';
 import { S3GetService } from '../../uploads/s3.get.service';
 import { DeepgramService } from '../../stt/deepgram.service';
-import { inferQnaFromUtterances } from '../../consultations/inference';
 
 @Processor('consultation')
 export class ConsultationProcessor extends WorkerHost {
@@ -36,15 +35,16 @@ export class ConsultationProcessor extends WorkerHost {
     try {
       const inputLang = (c.inputLanguage as string) || 'en';
 
+      // ── Step 1: Get transcript ──────────────────────────────────────
       // Use the realtime transcript saved at stop-time if segments are available.
       // Fall back to Deepgram batch transcription only if there is no realtime transcript.
       const storedSegments: any[] = (c.transcript as any)?.segments ?? [];
       const hasRealtimeTranscript = storedSegments.length > 0;
 
-      let transcriptOriginal: any;
+      let rawSegments: Array<{ speaker: number | string; text: string }>;
 
       if (hasRealtimeTranscript) {
-        transcriptOriginal = c.transcript;
+        rawSegments = storedSegments;
       } else {
         if (!c.audioObjectKey) {
           throw new Error('No realtime transcript and no audio file to transcribe');
@@ -59,63 +59,60 @@ export class ConsultationProcessor extends WorkerHost {
           language: sttLang,
         });
 
-        transcriptOriginal = {
-          language: inputLang,
-          segments: transcriptResult.segments,
-          text: transcriptResult.text,
-        };
+        rawSegments = transcriptResult.segments ?? [];
       }
 
-      let transcriptEn = transcriptOriginal;
+      // ── Step 2: AI-based speaker re-attribution ────────────────────
+      // Deepgram assigns speaker 0/1 by arrival order. GPT re-labels
+      // each segment as 'doctor' or 'patient' based on clinical context.
+      const numericSegs = rawSegments.map((s) => ({
+        speaker: typeof s.speaker === 'number' ? s.speaker : (s.speaker === 'patient' ? 1 : 0),
+        text: s.text,
+      }));
+
+      const labelledSegments = await this.ai.relabelSpeakers(numericSegs);
+
+      // ── Step 3: Translate if needed ────────────────────────────────
+      let finalSegments = labelledSegments;
       if (inputLang !== 'en') {
-        transcriptEn = await this.translate.translateDiarizedTranscriptToEnglish({
+        const translated = await this.translate.translateDiarizedTranscriptToEnglish({
           language: inputLang,
-          segments: (transcriptOriginal.segments ?? []).map((s: any) => ({
+          segments: labelledSegments.map((s) => ({
             speaker: s.speaker,
             text: s.text,
-            t0: s.t0,
-            t1: s.t1,
           })),
         });
+        finalSegments = (translated.segments ?? []).map((s: any) => ({
+          speaker: s.speaker as 'doctor' | 'patient',
+          text: s.text,
+        }));
       }
 
+      // ── Step 4: Build labelled transcript text for SOAP ────────────
+      const transcriptText = finalSegments
+        .map((s) => `${s.speaker === 'doctor' ? 'Doctor' : 'Patient'}: ${s.text}`)
+        .join('\n');
+
+      const transcriptToSave = {
+        language: inputLang,
+        segments: finalSegments,
+        text: transcriptText,
+      };
+
+      // ── Step 5: Generate SOAP note ─────────────────────────────────
       const note = await this.ai.generateSoapNote({
-        transcriptText:
-          transcriptEn.text ?? this.ai.flattenTranscript(transcriptEn),
+        transcriptText,
         language: 'en',
       });
-
-      // If diarization is unreliable (single speaker), infer Q/A as a fallback.
-      let inferredQna: any = null;
-      try {
-        const segs = (transcriptOriginal as any)?.segments ?? [];
-        const speakerSet = new Set<string>();
-        for (const s of segs) {
-          if (s?.speaker) speakerSet.add(String(s.speaker));
-        }
-        if (speakerSet.size <= 1) {
-          inferredQna = inferQnaFromUtterances({
-            utterances: undefined,
-            fallbackText: transcriptEn.text,
-          });
-        }
-      } catch {
-        inferredQna = null;
-      }
 
       await this.dbConn.db
         .update(consultations)
         .set({
           status: 'completed',
-          transcript: transcriptOriginal,
-          normalizedTranscriptEn: transcriptEn,
+          transcript: transcriptToSave,
+          normalizedTranscriptEn: transcriptToSave,
           soapNote: note.soap,
-          aiInsights: inferredQna
-            ? {
-                ...(note.insights ?? {}),
-                inferredQna,
-              }
-            : note.insights,
+          aiInsights: note.insights,
           error: null,
         })
         .where(
@@ -141,10 +138,7 @@ export class ConsultationProcessor extends WorkerHost {
 
       await this.dbConn.db
         .update(consultations)
-        .set({
-          status: 'failed',
-          error,
-        })
+        .set({ status: 'failed', error })
         .where(
           and(
             eq(consultations.id, consultationId),
