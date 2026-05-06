@@ -1,9 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async rewrites() {
-    const apiOrigin =
-      process.env.NEXT_PUBLIC_API_BASE_URL ||
-      (process.env.NODE_ENV === 'production' ? 'http://api:3002' : 'http://localhost:3002');
+    // Docker: API container is at http://api:3002. Local dev: http://localhost:3002.
+    const apiOrigin = process.env.API_INTERNAL_URL ?? 'http://localhost:3002';
     return [
       {
         source: '/api/:path*',

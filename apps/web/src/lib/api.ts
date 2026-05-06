@@ -19,6 +19,18 @@ export const api = axios.create({
   baseURL,
 });
 
+// Auto-redirect to /login on 401 so stale tokens never show as raw error messages
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err?.response?.status === 401 && typeof window !== 'undefined') {
+      localStorage.removeItem('docedge_token');
+      window.location.href = '/login';
+    }
+    return Promise.reject(err);
+  },
+);
+
 export function setAuthToken(token: string | null) {
   if (token) api.defaults.headers.common.Authorization = `Bearer ${token}`;
   else delete api.defaults.headers.common.Authorization;
