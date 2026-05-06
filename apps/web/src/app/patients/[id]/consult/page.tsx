@@ -245,6 +245,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       const AudioCtx = (window.AudioContext || (window as any).webkitAudioContext) as any;
       const audioCtx: AudioContext = new AudioCtx();
       audioCtxRef.current = audioCtx;
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
       const src = audioCtx.createMediaStreamSource(stream);
 
       const analyser = audioCtx.createAnalyser();
