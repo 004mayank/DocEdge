@@ -56,6 +56,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const segIdRef = useRef(0);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const startRef = useRef<(() => void) | null>(null);
+  const chatSegmentsRef = useRef<ChatSegment[]>([]);
 
   // ── State ──────────────────────────────────────────────────────
   const [state, setState] = useState<State>('idle');
@@ -128,8 +129,9 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatSegments, partialText]);
 
-  // ── Sync pause ref ────────────────────────────────────────────
+  // ── Sync refs ─────────────────────────────────────────────────
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { chatSegmentsRef.current = chatSegments; }, [chatSegments]);
 
   // ── Helpers ───────────────────────────────────────────────────
   function fmt(sec: number) {
@@ -341,9 +343,16 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         contentType: contentType || 'audio/webm',
         originalName: `consultation-${consultationId}.${ext}`,
       });
+      const segs = chatSegmentsRef.current;
       await api.post(`/consultations/${consultationId}/stop`, {
         audioObjectKey: pres.data.object.key,
         language: 'en',
+        realtimeTranscript: segs.length > 0
+          ? {
+              segments: segs.map(s => ({ speaker: s.speaker, text: s.text })),
+              text: segs.map(s => s.text).join(' '),
+            }
+          : undefined,
       });
 
       setState('processing');
