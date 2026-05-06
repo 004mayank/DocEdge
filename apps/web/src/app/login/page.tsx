@@ -26,7 +26,7 @@ export default function LoginPage() {
             });
 
       saveToken(res.data.token);
-      window.location.href = '/';
+      window.location.href = '/dashboard';
     } catch (e: any) {
       setError(e?.response?.data?.message ?? e.message ?? 'Failed');
     } finally {

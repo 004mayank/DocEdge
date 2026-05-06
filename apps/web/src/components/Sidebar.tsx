@@ -72,11 +72,11 @@ function LogoutIcon() {
 }
 
 const NAV = [
-  { label: 'Dashboard', href: '/', icon: DashboardIcon, match: (p: string) => p === '/' },
+  { label: 'Dashboard', href: '/dashboard', icon: DashboardIcon, match: (p: string) => p === '/dashboard' },
   { label: 'Consultations', href: '/patients', icon: ClipboardIcon, match: (p: string) => p.startsWith('/consultations') },
   { label: 'Patient List', href: '/patients', icon: UsersIcon, match: (p: string) => p.startsWith('/patients') },
   { label: 'Medical Records', href: '/patients', icon: FolderIcon, match: (_p: string) => false },
-  { label: 'Analytics', href: '/', icon: ChartIcon, match: (_p: string) => false },
+  { label: 'Analytics', href: '/dashboard', icon: ChartIcon, match: (_p: string) => false },
 ];
 
 export function Sidebar() {
