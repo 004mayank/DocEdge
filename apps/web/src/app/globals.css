@@ -13,11 +13,12 @@ html, body {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+  /* Hero-dark fallback so any sub-pixel gaps are invisible */
+  background: #020817;
 }
 
 body {
   color: rgb(var(--foreground));
-  background: rgb(var(--background));
 }
 
 @layer utilities {

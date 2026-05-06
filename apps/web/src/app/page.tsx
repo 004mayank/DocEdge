@@ -179,7 +179,7 @@ export default function HomePage() {
   }, []);
 
   return (
-    <div className="w-full bg-white text-gray-900">
+    <>
 
       {/* ── Navbar ─────────────────────────────────────────────────── */}
       <header className="fixed top-0 inset-x-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-100">
@@ -201,17 +201,12 @@ export default function HomePage() {
 
           <div className="flex items-center gap-3">
             {authed ? (
-              <a
-                href="/dashboard"
-                className="flex items-center gap-2 bg-blue-900 hover:bg-blue-800 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors"
-              >
+              <a href="/dashboard" className="flex items-center gap-2 bg-blue-900 hover:bg-blue-800 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors">
                 Open Dashboard <ArrowRightIcon />
               </a>
             ) : (
               <>
-                <a href="/login" className="text-sm text-gray-600 hover:text-gray-900 font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
-                  Log in
-                </a>
+                <a href="/login" className="text-sm text-gray-600 hover:text-gray-900 font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">Log in</a>
                 <a href="/login" className="flex items-center gap-2 bg-blue-900 hover:bg-blue-800 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors">
                   Get started <ArrowRightIcon />
                 </a>
@@ -221,123 +216,124 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* ── Hero ───────────────────────────────────────────────────── */}
-      <section className="w-full pt-32 pb-20 bg-gradient-to-b from-slate-950 via-blue-950 to-blue-900 text-white relative overflow-hidden">
-        {/* Background grid */}
-        <div className="absolute inset-0 opacity-10" style={{
-          backgroundImage: 'linear-gradient(rgba(255,255,255,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.12) 1px, transparent 1px)',
+      {/* ── Hero — two-column, terminal flush to right edge ────────── */}
+      <section
+        className="w-full min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-blue-900 text-white relative overflow-hidden"
+        style={{ backgroundImage: 'linear-gradient(135deg, #020817 0%, #0f172a 40%, #1e3a8a 100%)' }}
+      >
+        {/* Grid overlay */}
+        <div className="absolute inset-0 opacity-[0.07]" style={{
+          backgroundImage: 'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)',
           backgroundSize: '48px 48px',
         }} />
-
         {/* Glow blobs */}
-        <div className="absolute top-20 left-1/4 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 right-1/4 w-80 h-80 bg-violet-500/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-32 left-[10%] w-80 h-80 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-20 left-[30%] w-64 h-64 bg-violet-600/15 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative max-w-4xl mx-auto px-6 text-center">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 bg-blue-800/50 border border-blue-700/50 rounded-full px-4 py-1.5 text-xs text-blue-200 font-medium mb-8 backdrop-blur-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Powered by Deepgram nova-2 &amp; GPT-4
-          </div>
+        {/* Two-column layout — no centering wrapper, columns fill the viewport */}
+        <div className="relative z-10 flex items-stretch min-h-screen pt-16">
 
-          <h1 className="text-5xl md:text-6xl font-bold leading-tight tracking-tight">
-            Clinical documentation,<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-300 to-violet-300">
-              done in seconds.
-            </span>
-          </h1>
-
-          <p className="mt-6 text-lg text-blue-100/80 max-w-2xl mx-auto leading-relaxed">
-            DocEdge listens to your consultation in realtime, separates doctor and patient speech,
-            and generates a complete SOAP note the moment you stop speaking.
-          </p>
-
-          <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-            <a
-              href="/login"
-              className="inline-flex items-center justify-center gap-2 bg-white text-blue-900 font-semibold rounded-xl px-8 py-3.5 hover:bg-blue-50 transition-colors text-sm shadow-lg shadow-blue-950/30"
-            >
-              Start for free <ArrowRightIcon />
-            </a>
-            <a
-              href="#how-it-works"
-              className="inline-flex items-center justify-center gap-2 bg-blue-800/50 border border-blue-700/50 text-white font-medium rounded-xl px-8 py-3.5 hover:bg-blue-800 transition-colors text-sm backdrop-blur-sm"
-            >
-              See how it works
-            </a>
-          </div>
-
-          {/* Stat pills */}
-          <div className="mt-16 flex flex-wrap gap-4 justify-center">
-            {[
-              { label: 'Time saved per day', value: '2+ hrs' },
-              { label: 'Transcription accuracy', value: '98%' },
-              { label: 'Note generation time', value: '< 30s' },
-            ].map(s => (
-              <div key={s.label} className="bg-white/5 border border-white/10 rounded-xl px-5 py-3 backdrop-blur-sm">
-                <div className="text-2xl font-bold text-white">{s.value}</div>
-                <div className="text-xs text-blue-200/70 mt-0.5">{s.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Mock consultation card */}
-        <div className="relative max-w-3xl mx-auto px-6 mt-16">
-          <div className="bg-slate-900/80 border border-white/10 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm">
-            {/* Window chrome */}
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10 bg-slate-950/50">
-              <span className="w-3 h-3 rounded-full bg-red-500/70" />
-              <span className="w-3 h-3 rounded-full bg-yellow-500/70" />
-              <span className="w-3 h-3 rounded-full bg-green-500/70" />
-              <span className="ml-3 text-xs text-slate-400 font-mono">docedge · live consultation</span>
-              <span className="ml-auto flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Recording
-              </span>
+          {/* LEFT: headline + CTA — takes 46% of viewport */}
+          <div className="w-[46%] flex flex-col justify-center pl-12 lg:pl-20 pr-8 py-20 shrink-0">
+            <div className="inline-flex items-center gap-2 bg-blue-800/50 border border-blue-700/50 rounded-full px-4 py-1.5 text-xs text-blue-200 font-medium mb-8 self-start backdrop-blur-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Powered by Deepgram nova-2 &amp; GPT-4
             </div>
 
-            {/* Transcript lines */}
-            <div className="p-5 space-y-3 text-sm font-mono">
+            <h1 className="text-5xl lg:text-6xl font-bold leading-[1.1] tracking-tight">
+              Clinical<br />documentation,<br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-300 to-violet-300">
+                done in seconds.
+              </span>
+            </h1>
+
+            <p className="mt-6 text-lg text-blue-100/75 max-w-md leading-relaxed">
+              DocEdge listens to your consultation in realtime, separates doctor and patient speech,
+              and generates a complete SOAP note the moment you stop.
+            </p>
+
+            <div className="mt-10 flex flex-wrap gap-4">
+              <a href="/login" className="inline-flex items-center gap-2 bg-white text-blue-900 font-semibold rounded-xl px-7 py-3.5 hover:bg-blue-50 transition-colors text-sm shadow-lg shadow-blue-950/40">
+                Start for free <ArrowRightIcon />
+              </a>
+              <a href="#how-it-works" className="inline-flex items-center gap-2 border border-blue-700/60 text-white font-medium rounded-xl px-7 py-3.5 hover:bg-blue-800/40 transition-colors text-sm">
+                See how it works
+              </a>
+            </div>
+
+            {/* Stats */}
+            <div className="mt-14 flex gap-6">
               {[
-                { speaker: 'Doctor', color: 'text-blue-300', text: 'Good morning. What brings you in today?' },
-                { speaker: 'Patient', color: 'text-violet-300', text: "I've had a throbbing headache for about three days now, mostly on the left side." },
-                { speaker: 'Doctor', color: 'text-blue-300', text: 'Any nausea, vomiting, or sensitivity to light?' },
-                { speaker: 'Patient', color: 'text-violet-300', text: 'Yes, light makes it much worse. And some nausea in the morning.' },
-                { speaker: 'Doctor', color: 'text-blue-300', text: 'This sounds consistent with a migraine presentation. Let me check your BP first.' },
-              ].map((line, i) => (
-                <div key={i} className="flex gap-3">
-                  <span className={`shrink-0 font-semibold ${line.color} w-14`}>{line.speaker}</span>
-                  <span className="text-slate-300">{line.text}</span>
+                { label: 'Time saved daily', value: '2+ hrs' },
+                { label: 'Accuracy', value: '98%' },
+                { label: 'Note time', value: '< 30s' },
+              ].map(s => (
+                <div key={s.label}>
+                  <div className="text-2xl font-bold text-white">{s.value}</div>
+                  <div className="text-xs text-blue-300/60 mt-0.5">{s.label}</div>
                 </div>
               ))}
-              <div className="flex gap-3 items-center">
-                <span className="shrink-0 w-14 text-slate-600">···</span>
-                <span className="w-2 h-4 bg-blue-400/70 rounded-sm animate-pulse" />
-              </div>
             </div>
+          </div>
 
-            {/* SOAP preview strip */}
-            <div className="border-t border-white/10 bg-slate-950/50 px-5 py-4">
-              <div className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-3">SOAP note — generating</div>
-              <div className="grid grid-cols-2 gap-3 text-xs">
+          {/* RIGHT: terminal mock — flush to right viewport edge */}
+          <div className="flex-1 flex items-center py-8 pl-6 pr-0 min-w-0">
+            <div className="w-full h-full bg-slate-900/80 border border-white/10 border-r-0 rounded-l-2xl overflow-hidden shadow-2xl flex flex-col" style={{ minHeight: '520px' }}>
+              {/* Window chrome */}
+              <div className="flex items-center gap-2 px-5 py-3.5 border-b border-white/10 bg-slate-950/60 shrink-0">
+                <span className="w-3 h-3 rounded-full bg-red-500/70" />
+                <span className="w-3 h-3 rounded-full bg-yellow-500/70" />
+                <span className="w-3 h-3 rounded-full bg-green-500/70" />
+                <span className="ml-3 text-xs text-slate-400 font-mono">docedge · live consultation</span>
+                <span className="ml-auto flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Recording
+                </span>
+              </div>
+
+              {/* Transcript */}
+              <div className="p-6 space-y-4 text-sm font-mono flex-1 overflow-auto">
                 {[
-                  { label: 'S', title: 'Subjective', text: 'Throbbing left-sided headache ×3 days, photophobia, morning nausea…' },
-                  { label: 'O', title: 'Objective', text: 'BP check pending. No focal neuro deficit noted on history.' },
-                  { label: 'A', title: 'Assessment', text: 'Consistent with migraine (ICD G43.9). Rule out secondary causes.' },
-                  { label: 'P', title: 'Plan', text: 'Sumatriptan 50mg PRN. Avoid triggers. Review in 2 weeks.' },
-                ].map(s => (
-                  <div key={s.label} className="bg-white/5 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="w-4 h-4 rounded bg-blue-600/60 flex items-center justify-center text-blue-200 font-bold text-xs">{s.label}</span>
-                      <span className="text-slate-400 font-medium">{s.title}</span>
-                    </div>
-                    <p className="text-slate-400 leading-relaxed">{s.text}</p>
+                  { speaker: 'Doctor', color: 'text-blue-300', text: 'Good morning. What brings you in today?' },
+                  { speaker: 'Patient', color: 'text-violet-300', text: "I've had a throbbing headache for about three days now, mostly on the left side." },
+                  { speaker: 'Doctor', color: 'text-blue-300', text: 'Any nausea, vomiting, or sensitivity to light?' },
+                  { speaker: 'Patient', color: 'text-violet-300', text: 'Yes, light makes it much worse. And some nausea in the morning.' },
+                  { speaker: 'Doctor', color: 'text-blue-300', text: 'This sounds consistent with a migraine presentation. Let me check your BP first.' },
+                ].map((line, i) => (
+                  <div key={i} className="flex gap-4">
+                    <span className={`shrink-0 font-semibold ${line.color} w-14`}>{line.speaker}</span>
+                    <span className="text-slate-300 leading-relaxed">{line.text}</span>
                   </div>
                 ))}
+                <div className="flex gap-4 items-center">
+                  <span className="shrink-0 w-14 text-slate-600">···</span>
+                  <span className="w-2 h-4 bg-blue-400/70 rounded-sm animate-pulse" />
+                </div>
+              </div>
+
+              {/* SOAP strip */}
+              <div className="border-t border-white/10 bg-slate-950/50 px-6 py-5 shrink-0">
+                <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-4">SOAP note — generating</div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  {[
+                    { label: 'S', title: 'Subjective', text: 'Throbbing left-sided headache ×3 days, photophobia, morning nausea…' },
+                    { label: 'O', title: 'Objective', text: 'BP check pending. No focal neuro deficit noted on history.' },
+                    { label: 'A', title: 'Assessment', text: 'Consistent with migraine (ICD G43.9). Rule out secondary causes.' },
+                    { label: 'P', title: 'Plan', text: 'Sumatriptan 50mg PRN. Avoid triggers. Review in 2 weeks.' },
+                  ].map(s => (
+                    <div key={s.label} className="bg-white/5 rounded-lg px-3 py-2.5">
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="w-4 h-4 rounded bg-blue-600/70 flex items-center justify-center text-blue-200 font-bold text-xs">{s.label}</span>
+                        <span className="text-slate-400 font-medium">{s.title}</span>
+                      </div>
+                      <p className="text-slate-400 leading-relaxed">{s.text}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
+
         </div>
       </section>
 
@@ -555,6 +551,6 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
-    </div>
+    </>
   );
 }
