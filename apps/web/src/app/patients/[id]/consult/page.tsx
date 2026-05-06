@@ -50,13 +50,12 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const procRef = useRef<ScriptProcessorNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const levelRef = useRef<number>(0);
-  const historyRef = useRef<number[]>([]);
   const lastTsRef = useRef<number>(0);
   const pausedRef = useRef(false);
   const segIdRef = useRef(0);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const startRef = useRef<(() => void) | null>(null);
 
   // ── State ──────────────────────────────────────────────────────
   const [state, setState] = useState<State>('idle');
@@ -71,6 +70,7 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   const [partialText, setPartialText] = useState('');
   const [elapsedSec, setElapsedSec] = useState<number>(0);
   const [paused, setPaused] = useState(false);
+  const [waveLevel, setWaveLevel] = useState(0);
   const [liveInsights, setLiveInsights] = useState<LiveInsight[]>([]);
   const [prevArtifacts, setPrevArtifacts] = useState<any[]>([]);
   const [soapTemplate, setSoapTemplate] = useState(SOAP_TEMPLATES[0]);
@@ -95,6 +95,11 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         setPatient(p.data);
         setPrevArtifacts((as.data.items ?? []).filter((a: any) => a.kind !== 'audio'));
       } catch {}
+
+      // Auto-start if navigated from patient detail with ?autostart=1
+      if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('autostart') === '1') {
+        setTimeout(() => startRef.current?.(), 300);
+      }
     })();
 
     return () => {
@@ -169,6 +174,9 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
   }
 
   // ── Start recording ───────────────────────────────────────────
+  // Keep a stable ref so the autostart timeout can call it after mount
+  useEffect(() => { startRef.current = start; });
+
   async function start() {
     try {
       setMessage('');
@@ -258,11 +266,11 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       src.connect(proc);
       proc.connect(audioCtx.destination);
 
-      // Waveform animation
+      // Waveform animation — update level at ~30fps for CSS bars
       const time = new Uint8Array(analyser.fftSize);
       const loop = () => {
         const a = analyserRef.current;
-        if (!a) return;
+        if (!a) { rafRef.current = requestAnimationFrame(loop); return; }
         a.getByteTimeDomainData(time);
         let sumSq = 0;
         for (let i = 0; i < time.length; i++) { const v = (time[i] - 128) / 128; sumSq += v * v; }
@@ -271,48 +279,10 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
         const dt = Math.max(0.001, (now - (lastTsRef.current || now)) / 1000);
         lastTsRef.current = now;
         const prev = levelRef.current || 0;
-        const coeff = rms > prev ? 1 - Math.exp(-dt / 0.12) : 1 - Math.exp(-dt / 1.4);
+        const coeff = rms > prev ? 1 - Math.exp(-dt / 0.08) : 1 - Math.exp(-dt / 0.6);
         levelRef.current = prev + (rms - prev) * coeff;
-        const env = Math.max(0.08, Math.min(1, levelRef.current * 5.0));
-        const hist = historyRef.current;
-        hist.push(env);
-        if (hist.length > 120) hist.splice(0, hist.length - 120);
-
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const dpr = window.devicePixelRatio || 1;
-          const cssW = canvas.clientWidth || 300;
-          const cssH = canvas.clientHeight || 40;
-          const w = Math.floor(cssW * dpr), h = Math.floor(cssH * dpr);
-          if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = '#030712';
-            ctx.fillRect(0, 0, w, h);
-            const grad = ctx.createLinearGradient(0, 0, w, 0);
-            grad.addColorStop(0, '#93c5fd'); grad.addColorStop(0.5, '#c084fc'); grad.addColorStop(1, '#93c5fd');
-            ctx.strokeStyle = grad;
-            ctx.lineWidth = (1.5 + env * 1) * dpr;
-            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-            const arr = historyRef.current, n = arr.length;
-            ctx.beginPath();
-            for (let i = 0; i < n; i++) {
-              const x = n <= 1 ? 0 : (i / (n - 1)) * w;
-              const y = (h / 2) - (h * 0.4) * arr[i];
-              i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-            ctx.globalAlpha = 0.45;
-            ctx.beginPath();
-            for (let i = 0; i < n; i++) {
-              const x = n <= 1 ? 0 : (i / (n - 1)) * w;
-              const y = (h / 2) + (h * 0.4) * arr[i];
-              i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-          }
-        }
+        const env = Math.max(0.05, Math.min(1, levelRef.current * 8.0));
+        setWaveLevel(env);
         rafRef.current = requestAnimationFrame(loop);
       };
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -467,14 +437,26 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
               )}
             </div>
 
-            {/* Waveform + timer strip — pinned, visible throughout the recording */}
+            {/* Waveform + timer strip */}
             {isRecording && (
-              <div className="bg-gray-950 px-5 py-3 flex items-center gap-4 shrink-0 border-b border-gray-800">
-                <canvas
-                  ref={el => { canvasRef.current = el; }}
-                  className="flex-1 rounded"
-                  style={{ height: '52px' }}
-                />
+              <div className="bg-gray-950 px-5 flex items-center gap-4 shrink-0 border-b border-gray-800" style={{ height: '64px' }}>
+                {/* CSS bar waveform */}
+                <div className="flex-1 flex items-center justify-center gap-0.5 h-10 overflow-hidden">
+                  {Array.from({ length: 48 }).map((_, i) => {
+                    const phase = (i / 48) * Math.PI * 2;
+                    const noise = Math.sin(phase * 3.7 + Date.now() * 0.003) * 0.3 + Math.sin(phase * 7.1 + Date.now() * 0.005) * 0.2;
+                    const h = paused ? 0.05 : Math.max(0.06, Math.min(1, waveLevel * (0.6 + noise)));
+                    const hpx = Math.round(h * 36);
+                    const opacity = 0.5 + h * 0.5;
+                    return (
+                      <div
+                        key={i}
+                        style={{ height: `${hpx}px`, opacity, transition: 'height 80ms ease, opacity 80ms ease' }}
+                        className="w-1 rounded-full bg-gradient-to-t from-blue-400 to-violet-400 shrink-0"
+                      />
+                    );
+                  })}
+                </div>
                 <div className="shrink-0 text-right">
                   <div className="text-2xl font-mono font-bold text-white leading-none tracking-tight">
                     {fmt(elapsedSec)}

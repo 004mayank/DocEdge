@@ -11,7 +11,7 @@ export class PatientsService {
 
   async create(
     user: AuthUser,
-    dto: { fullName: string; phone?: string; sex?: string },
+    dto: { fullName: string; phone?: string; sex?: string; dob?: string; bloodGroup?: string; allergies?: string },
   ) {
     const created = await this.dbConn.db
       .insert(patients)
@@ -20,6 +20,9 @@ export class PatientsService {
         fullName: dto.fullName,
         phone: dto.phone,
         sex: dto.sex,
+        dob: dto.dob ? new Date(dto.dob) : undefined,
+        bloodGroup: dto.bloodGroup,
+        allergies: dto.allergies,
       })
       .returning();
 

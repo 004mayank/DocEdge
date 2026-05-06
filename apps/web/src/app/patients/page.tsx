@@ -13,6 +13,9 @@ export default function PatientsPage() {
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newSex, setNewSex] = useState('');
+  const [newDob, setNewDob] = useState('');
+  const [newBloodGroup, setNewBloodGroup] = useState('');
+  const [newAllergies, setNewAllergies] = useState('');
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -37,9 +40,13 @@ export default function PatientsPage() {
         fullName: newName.trim(),
         phone: newPhone.trim() || undefined,
         sex: newSex || undefined,
+        dob: newDob || undefined,
+        bloodGroup: newBloodGroup || undefined,
+        allergies: newAllergies.trim() || undefined,
       });
       setItems(prev => [res.data, ...prev]);
       setNewName(''); setNewPhone(''); setNewSex('');
+      setNewDob(''); setNewBloodGroup(''); setNewAllergies('');
       setShowNew(false);
     } catch (e: any) {
       setError(e?.response?.data?.message ?? e.message ?? 'Failed');
@@ -118,12 +125,12 @@ export default function PatientsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Phone</label>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Date of Birth</label>
                   <input
-                    className="mt-1.5 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    placeholder="+91 98765 43210"
-                    value={newPhone}
-                    onChange={e => setNewPhone(e.target.value)}
+                    type="date"
+                    className="mt-1.5 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 bg-white"
+                    value={newDob}
+                    onChange={e => setNewDob(e.target.value)}
                   />
                 </div>
                 <div>
@@ -138,6 +145,35 @@ export default function PatientsPage() {
                     <option value="female">Female</option>
                     <option value="other">Other</option>
                   </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Phone</label>
+                  <input
+                    className="mt-1.5 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="+91 98765 43210"
+                    value={newPhone}
+                    onChange={e => setNewPhone(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Blood Group</label>
+                  <select
+                    className="mt-1.5 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 bg-white"
+                    value={newBloodGroup}
+                    onChange={e => setNewBloodGroup(e.target.value)}
+                  >
+                    <option value="">Unknown</option>
+                    {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Known Allergies</label>
+                  <input
+                    className="mt-1.5 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="e.g. Penicillin, Pollen"
+                    value={newAllergies}
+                    onChange={e => setNewAllergies(e.target.value)}
+                  />
                 </div>
               </div>
               <div className="mt-4 flex gap-3">

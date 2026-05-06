@@ -176,7 +176,7 @@ export default function PatientDetailPage({ params }: { params: { id: string } }
               </p>
             </div>
             <a
-              href={`/patients/${patientId}/consult`}
+              href={`/patients/${patientId}/consult?autostart=1`}
               className="shrink-0 flex items-center gap-2 bg-white text-blue-900 font-semibold text-sm rounded-xl px-6 py-3 hover:bg-blue-50 transition-colors shadow"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

@@ -17,6 +17,9 @@ const CreatePatientSchema = z.object({
   fullName: z.string().min(2),
   phone: z.string().optional(),
   sex: z.enum(['male', 'female', 'other']).optional(),
+  dob: z.string().optional(),
+  bloodGroup: z.enum(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).optional(),
+  allergies: z.string().optional(),
 });
 
 @Controller('patients')

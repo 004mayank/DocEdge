@@ -40,6 +40,8 @@ export const patients = pgTable('patients', {
   dob: timestamp('dob', { withTimezone: true }),
   sex: varchar('sex', { length: 16 }),
   phone: text('phone'),
+  bloodGroup: varchar('blood_group', { length: 8 }),
+  allergies: text('allergies'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
