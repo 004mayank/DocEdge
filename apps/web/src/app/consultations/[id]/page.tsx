@@ -66,15 +66,18 @@ export default function ConsultationDetailPage({ params }: { params: { id: strin
   function formatTranscript() {
     const t = c?.normalizedTranscriptEn ?? c?.transcript;
     if (!t) return null;
-    if (typeof t.text === 'string' && t.text.trim()) return [{ speaker: null, text: t.text }];
+    // Segments take priority — text field has embedded "Doctor:/Patient:" labels
     const segs = Array.isArray(t.segments) ? t.segments : [];
-    if (!segs.length) return null;
-    return segs.map((s: any) => ({
-      speaker: s.speaker,
-      text: s.text ?? '',
-      t0: s.t0,
-      t1: s.t1,
-    }));
+    if (segs.length > 0) {
+      return segs.map((s: any) => {
+        const speaker = typeof s.speaker === 'number'
+          ? s.speaker
+          : s.speaker === 'doctor' ? 0 : 1;
+        return { speaker, text: s.text ?? '', t0: s.t0, t1: s.t1 };
+      });
+    }
+    if (typeof t.text === 'string' && t.text.trim()) return [{ speaker: null, text: t.text }];
+    return null;
   }
 
   const transcriptSegs = formatTranscript();
