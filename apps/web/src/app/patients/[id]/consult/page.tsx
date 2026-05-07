@@ -516,11 +516,14 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
                 </div>
               ))}
 
-              {/* Partial / typing indicator */}
+              {/* Partial — rendered as a live chat bubble so users see words as they speak */}
               {isRecording && partialText && (
-                <div className="space-y-0.5 opacity-60">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">Speaking…</div>
-                  <div className="inline-block max-w-[85%] bg-gray-50 border border-dashed border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-500 italic">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    Live
+                  </div>
+                  <div className="inline-block max-w-[85%] bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-sm text-gray-700 leading-relaxed">
                     {partialText}
                   </div>
                 </div>

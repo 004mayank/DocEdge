@@ -40,8 +40,8 @@ export class DeepgramRealtimeClient {
     url.searchParams.set('smart_format', 'true');
     url.searchParams.set('interim_results', 'true');
     url.searchParams.set('diarize', 'true');
-    // 200ms endpointing: fast enough for rapid doctor-patient exchanges.
-    url.searchParams.set('endpointing', '200');
+    // 100ms endpointing: fires finals quickly after short pauses.
+    url.searchParams.set('endpointing', '100');
     url.searchParams.set('encoding', 'linear16');
     url.searchParams.set('sample_rate', '16000');
     url.searchParams.set('channels', '1');
