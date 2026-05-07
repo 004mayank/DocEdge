@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { loadEnv } from '../config/env';
-import { openaiChatJson } from './openai.client';
+import { openaiChatJson, openaiVisionJson } from './openai.client';
 
 export type TranscriptSegment = { speaker: string | number; text: string };
 
@@ -59,7 +59,40 @@ export class AiService {
     }
   }
 
-  async generateSoapNote(input: { transcriptText: string; language: string }) {
+  async analyzeImagingStudy(images: Array<{ base64: string; mimeType: string }>): Promise<{
+    modality: string;
+    findings: string[];
+    impressions: string;
+    flags: string[];
+  }> {
+    const system = [
+      'You are a clinical radiology assistant.',
+      'Analyze the provided medical imaging (CT, MRI, X-ray, etc.).',
+      'Describe only what is visibly present. Do NOT invent findings.',
+      'This is assistive output only — a radiologist or doctor must verify.',
+      'Output JSON only.',
+    ].join('\n');
+
+    const schemaHint = `{
+  "modality": "CT|MRI|X-ray|Ultrasound|Other",
+  "findings": ["string — specific observable finding"],
+  "impressions": "string — overall clinical impression in 1-2 sentences",
+  "flags": ["string — anything that may require urgent attention"]
+}`;
+
+    try {
+      return await openaiVisionJson<any>({
+        system,
+        userText: 'Analyze this medical imaging study.',
+        images,
+        schemaHint,
+      });
+    } catch {
+      return { modality: 'Unknown', findings: [], impressions: 'Image analysis unavailable.', flags: [] };
+    }
+  }
+
+  async generateSoapNote(input: { transcriptText: string; language: string; imagingContext?: string }) {
     if (this.env.AI_PROVIDER === 'internal') {
       return {
         soap: {
@@ -107,6 +140,7 @@ export class AiService {
       `Language: ${input.language}`,
       'Consultation transcript:',
       input.transcriptText || '(empty transcript)',
+      ...(input.imagingContext ? ['\nImaging study findings (attach to Objective):', input.imagingContext] : []),
     ].join('\n\n');
 
     const out = await openaiChatJson<any>({ system, user, schemaHint });

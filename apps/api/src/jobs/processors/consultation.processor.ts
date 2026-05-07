@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Inject } from '@nestjs/common';
 import { DB } from '../../db/db.module';
-import { consultations, timelineEvents } from '../../db/schema';
+import { artifacts, consultations, timelineEvents } from '../../db/schema';
 import { and, eq } from 'drizzle-orm';
 import { AiService } from '../../ai/ai.service';
 import { TranslateService } from '../../ai/translate.service';
@@ -102,11 +102,66 @@ export class ConsultationProcessor extends WorkerHost {
         text: transcriptText,
       };
 
-      // ── Step 5: Generate SOAP note ─────────────────────────────────
+      // ── Step 5: Analyze any imaging artifacts attached to this consultation ──
+      let imagingContext: string | undefined;
+      let imagingResult: Awaited<ReturnType<typeof this.ai.analyzeImagingStudy>> | undefined;
+      try {
+        const imageArtifacts = await this.dbConn.db
+          .select()
+          .from(artifacts)
+          .where(
+            and(
+              eq(artifacts.consultationId, consultationId),
+              eq(artifacts.kind, 'image'),
+            ),
+          );
+
+        if (imageArtifacts.length > 0) {
+          const imageInputs: Array<{ base64: string; mimeType: string }> = [];
+          for (const art of imageArtifacts) {
+            try {
+              const { buffer, contentType } = await this.s3get.getObjectBuffer(art.objectKey);
+              const mimeType = contentType ?? art.contentType ?? 'image/jpeg';
+              if (!mimeType.startsWith('image/')) continue;
+              if (imageInputs.length >= 4) break;
+              imageInputs.push({ base64: buffer.toString('base64'), mimeType });
+            } catch { /* skip individual failures */ }
+          }
+
+          if (imageInputs.length > 0) {
+            imagingResult = await this.ai.analyzeImagingStudy(imageInputs);
+            imagingContext = [
+              `Modality: ${imagingResult.modality}`,
+              `Findings: ${imagingResult.findings.join('; ') || 'None noted'}`,
+              `Impression: ${imagingResult.impressions}`,
+              ...(imagingResult.flags.length ? [`Flags: ${imagingResult.flags.join('; ')}`] : []),
+            ].join('\n');
+          }
+        }
+      } catch { /* imaging analysis is best-effort */ }
+
+      // ── Step 6: Generate SOAP note ─────────────────────────────────
       const note = await this.ai.generateSoapNote({
         transcriptText,
         language: 'en',
+        imagingContext,
       });
+
+      // Merge imaging findings into insights
+      if (imagingResult) {
+        note.insights = note.insights ?? {};
+        note.insights.imaging = {
+          modality: imagingResult.modality,
+          findings: imagingResult.findings,
+          impression: imagingResult.impressions,
+        };
+        if (imagingResult.flags.length) {
+          note.insights.warnings = [
+            ...imagingResult.flags.map((f) => `[Imaging] ${f}`),
+            ...(note.insights.warnings ?? []),
+          ];
+        }
+      }
 
       await this.dbConn.db
         .update(consultations)

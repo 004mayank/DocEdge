@@ -266,6 +266,27 @@ export default function ConsultationDetailPage({ params }: { params: { id: strin
                     </div>
                   )}
 
+                  {c.aiInsights.imaging && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Imaging Study</h3>
+                      <div className="bg-white border border-gray-100 rounded-lg px-4 py-3 text-sm shadow-sm space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded px-2 py-0.5">{c.aiInsights.imaging.modality}</span>
+                        </div>
+                        {c.aiInsights.imaging.findings?.length > 0 && (
+                          <ul className="list-disc list-inside text-gray-700 space-y-0.5">
+                            {c.aiInsights.imaging.findings.map((f: string, i: number) => (
+                              <li key={i}>{f}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {c.aiInsights.imaging.impression && (
+                          <p className="text-gray-600 italic text-xs border-t border-gray-50 pt-2">{c.aiInsights.imaging.impression}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {c.aiInsights.entities?.length > 0 && (
                     <div>
                       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Clinical Entities</h3>
