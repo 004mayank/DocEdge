@@ -19,15 +19,20 @@ export type DeepgramRealtimeTranscriptEvent = {
 export class DeepgramRealtimeClient {
   private env = loadEnv();
   private ws: WebSocket | null = null;
-  private onTranscript: ((e: DeepgramRealtimeTranscriptEvent) => void) | null =
-    null;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private onTranscript: ((e: DeepgramRealtimeTranscriptEvent) => void) | null = null;
+  private onDisconnect: (() => void) | null = null;
 
   constructor(private opts: DeepgramRealtimeOptions) {}
 
-  async connect(onTranscript: (e: DeepgramRealtimeTranscriptEvent) => void) {
+  async connect(
+    onTranscript: (e: DeepgramRealtimeTranscriptEvent) => void,
+    onDisconnect?: () => void,
+  ) {
     if (!this.env.DEEPGRAM_API_KEY) throw new Error('DEEPGRAM_API_KEY not set');
 
     this.onTranscript = onTranscript;
+    this.onDisconnect = onDisconnect ?? null;
 
     const url = new URL('wss://api.deepgram.com/v1/listen');
     url.searchParams.set('model', 'nova-2');
@@ -35,10 +40,8 @@ export class DeepgramRealtimeClient {
     url.searchParams.set('smart_format', 'true');
     url.searchParams.set('interim_results', 'true');
     url.searchParams.set('diarize', 'true');
-    // utterances=true adds 1-3s delay — removed. Use is_final from Results instead.
-    // 400ms endpointing: allows natural mid-sentence pauses without fragmentation.
-    url.searchParams.set('endpointing', '400');
-    // Realtime streaming works best with raw PCM.
+    // 200ms endpointing: fast enough for rapid doctor-patient exchanges.
+    url.searchParams.set('endpointing', '200');
     url.searchParams.set('encoding', 'linear16');
     url.searchParams.set('sample_rate', '16000');
     url.searchParams.set('channels', '1');
@@ -47,9 +50,7 @@ export class DeepgramRealtimeClient {
     }
 
     this.ws = new WebSocket(url.toString(), {
-      headers: {
-        Authorization: `Token ${this.env.DEEPGRAM_API_KEY}`,
-      },
+      headers: { Authorization: `Token ${this.env.DEEPGRAM_API_KEY}` },
     } as any);
 
     const ws = this.ws;
@@ -59,14 +60,20 @@ export class DeepgramRealtimeClient {
       ws.on('error', (e: any) => reject(e));
     });
 
+    // Deepgram closes the connection after ~12s without audio data.
+    // Send a KeepAlive every 8s to keep it alive during silence/pauses.
+    this.keepAliveTimer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'KeepAlive' }));
+      }
+    }, 8000);
+
     ws.on('message', (data: any) => {
       try {
         const dataStr = typeof data === 'string' ? data : data?.toString?.();
         if (!dataStr) return;
         const msg = JSON.parse(dataStr);
 
-        // Only handle Results messages (have channel.alternatives).
-        // Skip UtteranceEnd / SpeechStarted / Metadata etc.
         const alt = msg?.channel?.alternatives?.[0];
         if (!alt) return;
 
@@ -76,16 +83,29 @@ export class DeepgramRealtimeClient {
         const words = alt.words;
         const isFinal = Boolean(msg?.is_final || msg?.speech_final);
 
-        this.onTranscript?.({
-          isFinal,
-          transcript,
-          words,
-          raw: msg,
-        });
+        this.onTranscript?.({ isFinal, transcript, words, raw: msg });
       } catch {
-        // ignore
+        // ignore parse errors
       }
     });
+
+    ws.on('close', () => {
+      this._cleanup();
+      this.onDisconnect?.();
+    });
+
+    ws.on('error', () => {
+      this._cleanup();
+      this.onDisconnect?.();
+    });
+  }
+
+  private _cleanup() {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+    this.ws = null;
   }
 
   isConnected() {
@@ -93,16 +113,14 @@ export class DeepgramRealtimeClient {
   }
 
   sendAudio(chunk: Uint8Array) {
-    if (!this.ws) throw new Error('Deepgram realtime not connected');
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(chunk);
   }
 
   async close() {
+    this._cleanup();
     const ws = this.ws;
     if (!ws) return;
-    this.ws = null;
-    try {
-      ws.close();
-    } catch {}
+    try { ws.close(); } catch {}
   }
 }

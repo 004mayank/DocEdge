@@ -58,38 +58,43 @@ export class RealtimeGateway {
     // DO NOT emit 'ready' yet — the client must not send audio until DG is connected.
     this.sessions.set(socket.id, { chunks: [], mimetype, language, dg });
 
-    try {
-      await dg.connect((evt) => {
-        // Build speaker-labelled segments from word-level diarization.
-        // Each run of consecutive words with the same speaker becomes a segment.
-        const segments: Array<{ speaker: number; text: string }> = [];
-        const words = evt.words ?? [];
+    const onTranscript = (evt: any) => {
+      // Build speaker-labelled segments from word-level diarization.
+      const segments: Array<{ speaker: number; text: string }> = [];
+      const words = evt.words ?? [];
 
-        if (words.length > 0) {
-          let cur: { speaker: number; text: string } | null = null;
-          for (const w of words) {
-            const sid = typeof w.speaker === 'number' ? w.speaker : 0;
-            const token = w.word;
-            if (!token) continue;
-            if (!cur || cur.speaker !== sid) {
-              if (cur) segments.push(cur);
-              cur = { speaker: sid, text: token };
-            } else {
-              cur.text = `${cur.text} ${token}`;
-            }
+      if (words.length > 0) {
+        let cur: { speaker: number; text: string } | null = null;
+        for (const w of words) {
+          const sid = typeof w.speaker === 'number' ? w.speaker : 0;
+          const token = w.word;
+          if (!token) continue;
+          if (!cur || cur.speaker !== sid) {
+            if (cur) segments.push(cur);
+            cur = { speaker: sid, text: token };
+          } else {
+            cur.text = `${cur.text} ${token}`;
           }
-          if (cur) segments.push(cur);
-        } else if (evt.transcript) {
-          // No word-level data — emit as speaker 0
-          segments.push({ speaker: 0, text: evt.transcript });
         }
+        if (cur) segments.push(cur);
+      } else if (evt.transcript) {
+        segments.push({ speaker: 0, text: evt.transcript });
+      }
 
-        socket.emit(evt.isFinal ? 'final' : 'partial', {
-          text: evt.transcript,
-          segments: evt.isFinal ? segments : [],
-          isFinal: evt.isFinal,
-        });
+      socket.emit(evt.isFinal ? 'final' : 'partial', {
+        text: evt.transcript,
+        segments: evt.isFinal ? segments : [],
+        isFinal: evt.isFinal,
       });
+    };
+
+    const onDisconnect = () => {
+      this.logger.warn(`deepgram WS closed unexpectedly socket=${socket.id}`);
+      socket.emit('error', { message: 'Realtime STT connection lost' });
+    };
+
+    try {
+      await dg.connect(onTranscript, onDisconnect);
 
       this.logger.log(`deepgram connected socket=${socket.id}`);
 
@@ -133,8 +138,7 @@ export class RealtimeGateway {
     s.chunks.push(buf);
 
     try {
-      // If DG is still connecting, the chunk is already queued in s.chunks and will
-      // be flushed once the connection is established — just return silently.
+      // If DG is still connecting, chunk is queued in s.chunks and flushed after connect.
       if (s.dg && !s.dg.isConnected()) return;
       s.dg?.sendAudio(new Uint8Array(buf));
     } catch (e: any) {
