@@ -3,11 +3,12 @@ import { Job } from 'bullmq';
 import { Inject } from '@nestjs/common';
 import { DB } from '../../db/db.module';
 import { artifacts, consultations, timelineEvents } from '../../db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { AiService } from '../../ai/ai.service';
 import { TranslateService } from '../../ai/translate.service';
 import { S3GetService } from '../../uploads/s3.get.service';
 import { DeepgramService } from '../../stt/deepgram.service';
+import pdfParse from 'pdf-parse';
 
 @Processor('consultation')
 export class ConsultationProcessor extends WorkerHost {
@@ -102,32 +103,38 @@ export class ConsultationProcessor extends WorkerHost {
         text: transcriptText,
       };
 
-      // ── Step 5: Analyze any imaging artifacts attached to this consultation ──
+      // ── Step 5: Analyze image and document artifacts attached to this consultation ──
       let imagingContext: string | undefined;
       let imagingResult: Awaited<ReturnType<typeof this.ai.analyzeImagingStudy>> | undefined;
+      let documentContextParts: string[] = [];
+      let documentResults: Awaited<ReturnType<typeof this.ai.analyzeDocumentReport>>[] = [];
+
       try {
-        const imageArtifacts = await this.dbConn.db
+        const attachedArtifacts = await this.dbConn.db
           .select()
           .from(artifacts)
           .where(
             and(
               eq(artifacts.consultationId, consultationId),
-              eq(artifacts.kind, 'image'),
+              inArray(artifacts.kind, ['image', 'document']),
             ),
           );
 
-        if (imageArtifacts.length > 0) {
+        const imageArts = attachedArtifacts.filter((a: any) => a.kind === 'image');
+        const docArts = attachedArtifacts.filter((a: any) => a.kind === 'document');
+
+        // Images → GPT-4o vision
+        if (imageArts.length > 0) {
           const imageInputs: Array<{ base64: string; mimeType: string }> = [];
-          for (const art of imageArtifacts) {
+          for (const art of imageArts) {
             try {
               const { buffer, contentType } = await this.s3get.getObjectBuffer(art.objectKey);
               const mimeType = contentType ?? art.contentType ?? 'image/jpeg';
               if (!mimeType.startsWith('image/')) continue;
               if (imageInputs.length >= 4) break;
               imageInputs.push({ base64: buffer.toString('base64'), mimeType });
-            } catch { /* skip individual failures */ }
+            } catch { /* skip */ }
           }
-
           if (imageInputs.length > 0) {
             imagingResult = await this.ai.analyzeImagingStudy(imageInputs);
             imagingContext = [
@@ -138,13 +145,45 @@ export class ConsultationProcessor extends WorkerHost {
             ].join('\n');
           }
         }
-      } catch { /* imaging analysis is best-effort */ }
+
+        // Documents (PDF) → extract text → GPT analysis
+        for (const art of docArts.slice(0, 3)) {
+          try {
+            const { buffer, contentType } = await this.s3get.getObjectBuffer(art.objectKey);
+            const mime = contentType ?? art.contentType ?? '';
+            let text = '';
+            if (mime.includes('pdf') || art.originalName?.endsWith('.pdf')) {
+              const parsed = await pdfParse(buffer);
+              text = parsed.text?.trim() ?? '';
+            } else {
+              // Plain text / other text documents
+              text = buffer.toString('utf-8').trim();
+            }
+            if (!text) continue;
+            const result = await this.ai.analyzeDocumentReport(text);
+            documentResults.push(result);
+            documentContextParts.push(
+              [
+                `Report: ${result.reportType}`,
+                `Findings: ${result.keyFindings.join('; ') || 'None noted'}`,
+                `Summary: ${result.summary}`,
+                ...(result.flags.length ? [`Flags: ${result.flags.join('; ')}`] : []),
+              ].join('\n'),
+            );
+          } catch { /* skip individual failures */ }
+        }
+      } catch { /* artifact analysis is best-effort */ }
 
       // ── Step 6: Generate SOAP note ─────────────────────────────────
+      const documentContext = documentContextParts.length
+        ? documentContextParts.join('\n\n---\n\n')
+        : undefined;
+
       const note = await this.ai.generateSoapNote({
         transcriptText,
         language: 'en',
         imagingContext,
+        documentContext,
       });
 
       // Merge imaging findings into insights
@@ -158,6 +197,23 @@ export class ConsultationProcessor extends WorkerHost {
         if (imagingResult.flags.length) {
           note.insights.warnings = [
             ...imagingResult.flags.map((f) => `[Imaging] ${f}`),
+            ...(note.insights.warnings ?? []),
+          ];
+        }
+      }
+
+      // Merge document report findings into insights
+      if (documentResults.length > 0) {
+        note.insights = note.insights ?? {};
+        note.insights.documents = documentResults.map((r) => ({
+          reportType: r.reportType,
+          keyFindings: r.keyFindings,
+          summary: r.summary,
+        }));
+        const docFlags = documentResults.flatMap((r) => r.flags);
+        if (docFlags.length) {
+          note.insights.warnings = [
+            ...docFlags.map((f) => `[Report] ${f}`),
             ...(note.insights.warnings ?? []),
           ];
         }

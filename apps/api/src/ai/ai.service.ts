@@ -59,6 +59,38 @@ export class AiService {
     }
   }
 
+  async analyzeDocumentReport(text: string): Promise<{
+    reportType: string;
+    keyFindings: string[];
+    summary: string;
+    flags: string[];
+  }> {
+    const system = [
+      'You are a clinical document analyst.',
+      'Extract structured clinical information from the medical report text provided.',
+      'Do NOT invent information not present in the document.',
+      'This is assistive output only — a doctor must verify.',
+      'Output JSON only.',
+    ].join('\n');
+
+    const schemaHint = `{
+  "reportType": "string — e.g. Lab Report, Radiology Report, Pathology, Discharge Summary",
+  "keyFindings": ["string — specific result or finding from the report"],
+  "summary": "string — concise clinical summary in 1-2 sentences",
+  "flags": ["string — abnormal values or findings requiring attention"]
+}`;
+
+    try {
+      return await openaiChatJson<any>({
+        system,
+        user: `Extract clinical information from this medical report:\n\n${text.slice(0, 8000)}`,
+        schemaHint,
+      });
+    } catch {
+      return { reportType: 'Unknown', keyFindings: [], summary: 'Document analysis unavailable.', flags: [] };
+    }
+  }
+
   async analyzeImagingStudy(images: Array<{ base64: string; mimeType: string }>): Promise<{
     modality: string;
     findings: string[];
@@ -92,7 +124,7 @@ export class AiService {
     }
   }
 
-  async generateSoapNote(input: { transcriptText: string; language: string; imagingContext?: string }) {
+  async generateSoapNote(input: { transcriptText: string; language: string; imagingContext?: string; documentContext?: string }) {
     if (this.env.AI_PROVIDER === 'internal') {
       return {
         soap: {
@@ -140,7 +172,8 @@ export class AiService {
       `Language: ${input.language}`,
       'Consultation transcript:',
       input.transcriptText || '(empty transcript)',
-      ...(input.imagingContext ? ['\nImaging study findings (attach to Objective):', input.imagingContext] : []),
+      ...(input.imagingContext ? ['\nImaging study findings (incorporate into Objective):', input.imagingContext] : []),
+      ...(input.documentContext ? ['\nAttached medical report(s) (incorporate into Objective and Plan):', input.documentContext] : []),
     ].join('\n\n');
 
     const out = await openaiChatJson<any>({ system, user, schemaHint });

@@ -266,6 +266,32 @@ export default function ConsultationDetailPage({ params }: { params: { id: strin
                     </div>
                   )}
 
+                  {c.aiInsights.documents?.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Attached Reports</h3>
+                      <div className="space-y-2">
+                        {c.aiInsights.documents.map((doc: any, i: number) => (
+                          <div key={i} className="bg-white border border-gray-100 rounded-lg px-4 py-3 text-sm shadow-sm space-y-2">
+                            <div className="flex items-center gap-2">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                              </svg>
+                              <span className="text-xs font-semibold text-gray-700">{doc.reportType}</span>
+                            </div>
+                            {doc.keyFindings?.length > 0 && (
+                              <ul className="list-disc list-inside text-gray-700 space-y-0.5">
+                                {doc.keyFindings.map((f: string, j: number) => <li key={j}>{f}</li>)}
+                              </ul>
+                            )}
+                            {doc.summary && (
+                              <p className="text-gray-500 italic text-xs border-t border-gray-50 pt-2">{doc.summary}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {c.aiInsights.imaging && (
                     <div>
                       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Imaging Study</h3>
