@@ -3,12 +3,14 @@ import { Job } from 'bullmq';
 import { Inject } from '@nestjs/common';
 import { DB } from '../../db/db.module';
 import { artifacts, consultations, timelineEvents } from '../../db/schema';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { AiService } from '../../ai/ai.service';
 import { TranslateService } from '../../ai/translate.service';
 import { S3GetService } from '../../uploads/s3.get.service';
 import { DeepgramService } from '../../stt/deepgram.service';
-import pdfParse from 'pdf-parse';
+// pdf-parse ships as CJS; require() avoids the ESM default-export mismatch
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse: (buf: Buffer) => Promise<{ text: string }> = require('pdf-parse');
 
 @Processor('consultation')
 export class ConsultationProcessor extends WorkerHost {
@@ -110,13 +112,20 @@ export class ConsultationProcessor extends WorkerHost {
       let documentResults: Awaited<ReturnType<typeof this.ai.analyzeDocumentReport>>[] = [];
 
       try {
+        // Include artifacts linked directly to this consultation OR uploaded to
+        // the patient record without a consultation (e.g. CT scans uploaded
+        // from the patient detail page before/after the session).
         const attachedArtifacts = await this.dbConn.db
           .select()
           .from(artifacts)
           .where(
             and(
-              eq(artifacts.consultationId, consultationId),
+              eq(artifacts.patientId, c.patientId),
               inArray(artifacts.kind, ['image', 'document']),
+              or(
+                eq(artifacts.consultationId, consultationId),
+                isNull(artifacts.consultationId),
+              ),
             ),
           );
 
