@@ -14,6 +14,7 @@ export class DeepgramService {
     if (!this.env.DEEPGRAM_API_KEY) throw new Error('DEEPGRAM_API_KEY not set');
 
     const url = new URL('https://api.deepgram.com/v1/listen');
+    url.searchParams.set('model', 'nova-2-medical'); // clinical vocabulary
     url.searchParams.set('punctuate', 'true');
     url.searchParams.set('smart_format', 'true');
     url.searchParams.set('diarize', 'true');

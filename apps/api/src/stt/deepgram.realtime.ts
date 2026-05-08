@@ -35,11 +35,12 @@ export class DeepgramRealtimeClient {
     this.onDisconnect = onDisconnect ?? null;
 
     const url = new URL('wss://api.deepgram.com/v1/listen');
-    url.searchParams.set('model', 'nova-2');
+    // nova-2-medical is trained on clinical speech — dramatically better accuracy
+    // for medical terms like "headache", "hypertension", drug names, etc.
+    url.searchParams.set('model', 'nova-2-medical');
     url.searchParams.set('punctuate', 'true');
-    // smart_format and diarize both add Deepgram-side processing latency.
-    // For live transcription we prioritise speed; speaker labels are assigned
-    // by the AI post-processing step (consultation.processor.ts).
+    url.searchParams.set('smart_format', 'true'); // improves accuracy + formatting
+    // diarize omitted — adds server latency; speaker labels assigned by AI post-processing.
     url.searchParams.set('interim_results', 'true');
     // 500 ms endpointing: waits for a natural phrase boundary before firing a final.
     // Partials (interim_results=true) still update the Live bubble every ~200 ms —
