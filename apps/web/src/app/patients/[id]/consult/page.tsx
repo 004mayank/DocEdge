@@ -240,38 +240,19 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
       sock.on('error', (e: any) => setMessage(e?.message ? `Realtime STT: ${e.message}` : 'Realtime STT error'));
 
-      recorder.ondataavailable = (e) => { if (e.data?.size > 0) chunksRef.current.push(e.data); };
-      recorder.onstop = () => stream.getTracks().forEach(t => t.stop());
-
-      await ready;
-
-      // AudioContext for PCM streaming + analyser
+      // AudioContext for waveform visualisation only (no PCM streaming)
       const AudioCtx = (window.AudioContext || (window as any).webkitAudioContext) as any;
       const audioCtx: AudioContext = new AudioCtx();
       audioCtxRef.current = audioCtx;
       if (audioCtx.state === 'suspended') await audioCtx.resume();
       const src = audioCtx.createMediaStreamSource(stream);
-
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.85;
       analyserRef.current = analyser;
       src.connect(analyser);
 
-      const proc = audioCtx.createScriptProcessor(1024, 1, 1);
-      procRef.current = proc;
-      proc.onaudioprocess = (evt) => {
-        if (pausedRef.current) return;
-        const input = evt.inputBuffer.getChannelData(0);
-        const down = downsampleTo16k(input, audioCtx.sampleRate);
-        const pcm16 = floatTo16BitPCM(down);
-        const s = socketRef.current;
-        if (s?.connected) s.emit('audio', pcm16);
-      };
-      src.connect(proc);
-      proc.connect(audioCtx.destination);
-
-      // Waveform animation — update level at ~30fps for CSS bars
+      // Waveform animation
       const time = new Uint8Array(analyser.fftSize);
       const loop = () => {
         const a = analyserRef.current;
@@ -293,7 +274,21 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(loop);
 
-      recorder.start(250);
+      await ready;
+
+      // Stream audio to Deepgram via MediaRecorder (100ms timeslices).
+      // This replaces the deprecated ScriptProcessorNode approach — the browser
+      // handles encoding natively; each chunk is sent directly over Socket.IO.
+      recorder.ondataavailable = (e) => {
+        if (!e.data?.size) return;
+        chunksRef.current.push(e.data); // collect for S3 upload
+        if (pausedRef.current) return;  // don't stream while paused
+        e.data.arrayBuffer().then((buf) => {
+          if (!pausedRef.current) socketRef.current?.emit('audio', new Uint8Array(buf));
+        });
+      };
+      recorder.onstop = () => stream.getTracks().forEach(t => t.stop());
+      recorder.start(100); // 100ms chunks → ~10 packets/sec to Deepgram
       mediaRecorderRef.current = recorder;
       setState('recording');
 
@@ -610,7 +605,12 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
                     End Session & Generate SOAP Note
                   </button>
                   <button
-                    onClick={() => setPaused(p => !p)}
+                    onClick={() => {
+                      const next = !paused;
+                      setPaused(next);
+                      if (next) mediaRecorderRef.current?.pause();
+                      else mediaRecorderRef.current?.resume();
+                    }}
                     className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-medium border transition-colors ${
                       paused
                         ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'

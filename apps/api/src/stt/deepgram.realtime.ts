@@ -42,9 +42,8 @@ export class DeepgramRealtimeClient {
     url.searchParams.set('diarize', 'true');
     // 100ms endpointing: fires finals quickly after short pauses.
     url.searchParams.set('endpointing', '100');
-    url.searchParams.set('encoding', 'linear16');
-    url.searchParams.set('sample_rate', '16000');
-    url.searchParams.set('channels', '1');
+    // No encoding/sample_rate/channels — Deepgram auto-detects from the
+    // WebM/Opus container headers sent by the browser's MediaRecorder.
     if (this.opts.language && this.opts.language !== 'hi-en') {
       url.searchParams.set('language', this.opts.language);
     }
