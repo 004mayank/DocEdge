@@ -193,10 +193,13 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       // ── 1. Get microphone ──────────────────────────────────────────────
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // ── 2. Create AudioContext at 16 kHz ──────────────────────────────
-      // 16 kHz matches Deepgram linear16 requirement exactly — no resampling needed.
+      // ── 2. Create AudioContext at the native system rate ───────────────
+      // Do NOT force 16 kHz here — macOS Chrome may silently ignore the hint
+      // and stay at 44 100/48 000 Hz, causing a speed mismatch with Deepgram.
+      // The AudioWorklet processor downsamples to 16 kHz internally so Deepgram
+      // always gets clean 16 kHz regardless of the host rate.
       const AudioCtxClass = (window.AudioContext || (window as any).webkitAudioContext) as any;
-      const audioCtx: AudioContext = new AudioCtxClass({ sampleRate: 16000 });
+      const audioCtx: AudioContext = new AudioCtxClass();
       audioCtxRef.current = audioCtx;
       if (audioCtx.state === 'suspended') await audioCtx.resume();
 
