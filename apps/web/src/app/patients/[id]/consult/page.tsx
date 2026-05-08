@@ -9,7 +9,7 @@ import { Sidebar } from '@/components/Sidebar';
 
 type State = 'idle' | 'recording' | 'uploading' | 'processing' | 'done' | 'error';
 
-type ChatSegment = { id: number; speaker: number; text: string };
+type ChatSegment = { id: number; speaker: number; text: string; ts?: number };
 
 type LiveInsight = { type: 'symptom' | 'history'; title: string; desc: string };
 
@@ -248,20 +248,30 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       });
 
       sock.on('final', (p: any) => {
-        const segs: Array<{ speaker: number; text: string }> = p?.segments ?? [];
-        if (segs.length) {
-          const valid = segs.filter((s: any) => s.speaker !== -1 && s.text?.trim());
-          if (valid.length) {
-            setChatSegments(prev => [
-              ...prev,
-              ...valid.map((s: any) => ({ id: segIdRef.current++, speaker: s.speaker ?? 0, text: s.text })),
-            ]);
-          } else if (p?.text?.trim()) {
-            setChatSegments(prev => [...prev, { id: segIdRef.current++, speaker: 0, text: p.text }]);
+        const text: string = (p?.text ?? '').trim();
+        if (!text) { setPartialText(''); return; }
+
+        // Merge into the previous segment if it's the same speaker and arrived
+        // within 2 s — avoids micro-fragments from aggressive endpointing.
+        const MERGE_MS = 2000;
+        const now = Date.now();
+
+        setChatSegments(prev => {
+          const last = prev[prev.length - 1];
+          if (
+            last &&
+            last.speaker === 0 && // diarize off in realtime → all speaker 0
+            (now - (last.ts ?? 0)) < MERGE_MS
+          ) {
+            // Append to existing bubble
+            return [
+              ...prev.slice(0, -1),
+              { ...last, text: `${last.text} ${text}`, ts: now },
+            ];
           }
-        } else if (p?.text?.trim()) {
-          setChatSegments(prev => [...prev, { id: segIdRef.current++, speaker: 0, text: p.text }]);
-        }
+          return [...prev, { id: segIdRef.current++, speaker: 0, text, ts: now }];
+        });
+
         setPartialText('');
       });
 

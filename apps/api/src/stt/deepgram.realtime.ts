@@ -41,8 +41,11 @@ export class DeepgramRealtimeClient {
     // For live transcription we prioritise speed; speaker labels are assigned
     // by the AI post-processing step (consultation.processor.ts).
     url.searchParams.set('interim_results', 'true');
-    // 100 ms endpointing: Deepgram fires a final result quickly after a short pause.
-    url.searchParams.set('endpointing', '100');
+    // 500 ms endpointing: waits for a natural phrase boundary before firing a final.
+    // Partials (interim_results=true) still update the Live bubble every ~200 ms —
+    // endpointing only controls when a segment is committed as a final utterance.
+    // 100 ms was too aggressive and split single sentences into many micro-segments.
+    url.searchParams.set('endpointing', '500');
 
     // Raw PCM-16 path (AudioWorklet): must declare encoding explicitly.
     // WebM/Opus path: Deepgram auto-detects from container headers.
