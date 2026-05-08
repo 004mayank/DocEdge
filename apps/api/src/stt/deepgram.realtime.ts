@@ -37,13 +37,25 @@ export class DeepgramRealtimeClient {
     const url = new URL('wss://api.deepgram.com/v1/listen');
     url.searchParams.set('model', 'nova-2');
     url.searchParams.set('punctuate', 'true');
-    url.searchParams.set('smart_format', 'true');
+    // smart_format and diarize both add Deepgram-side processing latency.
+    // For live transcription we prioritise speed; speaker labels are assigned
+    // by the AI post-processing step (consultation.processor.ts).
     url.searchParams.set('interim_results', 'true');
-    url.searchParams.set('diarize', 'true');
-    // 100ms endpointing: fires finals quickly after short pauses.
+    // 100 ms endpointing: Deepgram fires a final result quickly after a short pause.
     url.searchParams.set('endpointing', '100');
-    // No encoding/sample_rate/channels — Deepgram auto-detects from the
-    // WebM/Opus container headers sent by the browser's MediaRecorder.
+
+    // Raw PCM-16 path (AudioWorklet): must declare encoding explicitly.
+    // WebM/Opus path: Deepgram auto-detects from container headers.
+    const isPCM =
+      this.opts.mimetype?.includes('l16') ||
+      this.opts.mimetype?.includes('pcm') ||
+      this.opts.mimetype === 'audio/raw';
+    if (isPCM) {
+      url.searchParams.set('encoding', 'linear16');
+      url.searchParams.set('sample_rate', '16000');
+      url.searchParams.set('channels', '1');
+    }
+
     if (this.opts.language && this.opts.language !== 'hi-en') {
       url.searchParams.set('language', this.opts.language);
     }

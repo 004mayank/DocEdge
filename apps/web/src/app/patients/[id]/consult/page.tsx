@@ -190,15 +190,42 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       setPartialText('');
       setPaused(false);
 
+      // ── 1. Get microphone ──────────────────────────────────────────────
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
+      // ── 2. Create AudioContext at 16 kHz ──────────────────────────────
+      // 16 kHz matches Deepgram linear16 requirement exactly — no resampling needed.
+      const AudioCtxClass = (window.AudioContext || (window as any).webkitAudioContext) as any;
+      const audioCtx: AudioContext = new AudioCtxClass({ sampleRate: 16000 });
+      audioCtxRef.current = audioCtx;
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+      // ── 3. Probe AudioWorklet availability BEFORE connecting the socket ─
+      // This lets us tell the gateway the correct mimetype up-front.
+      let useWorklet = false;
+      try {
+        await audioCtx.audioWorklet.addModule('/audio-processor.js');
+        useWorklet = true;
+      } catch {
+        console.warn('[DocEdge] AudioWorklet unavailable — will fall back to MediaRecorder streaming');
+      }
+
+      // ── 4. Create consultation record ─────────────────────────────────
       const res = await api.post('/consultations/start', { patientId, inputLanguage });
       setConsultationId(res.data.id);
 
+      // ── 5. MediaRecorder (S3 upload + optional streaming fallback) ────
       const recorder = contentType
         ? new MediaRecorder(stream, { mimeType: contentType })
         : new MediaRecorder(stream);
       chunksRef.current = [];
+
+      // ── 6. Connect Socket.IO with the correct streaming mimetype ──────
+      // When the worklet is active we stream raw PCM16 → tell Deepgram.
+      // Fallback: WebM/Opus from MediaRecorder — Deepgram auto-detects.
+      const streamMimetype = useWorklet
+        ? 'audio/l16;rate=16000'
+        : (contentType || 'audio/webm');
 
       const sock = io(getApiOrigin() || window.location.origin, {
         path: '/ws',
@@ -207,12 +234,12 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       socketRef.current = sock;
 
       const ready = new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('Realtime STT handshake timeout')), 8000);
+        const t = setTimeout(() => reject(new Error('Realtime STT handshake timeout')), 10000);
         sock.on('ready', () => { clearTimeout(t); resolve(); });
       });
 
       sock.on('connect', () => {
-        sock.emit('start', { mimetype: contentType || 'audio/webm', language: inputLanguage });
+        sock.emit('start', { mimetype: streamMimetype, language: inputLanguage });
       });
       sock.on('connect_error', (e: any) => setMessage(`Connect error: ${e?.message ?? e}`));
 
@@ -240,19 +267,15 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
 
       sock.on('error', (e: any) => setMessage(e?.message ? `Realtime STT: ${e.message}` : 'Realtime STT error'));
 
-      // AudioContext for waveform visualisation only (no PCM streaming)
-      const AudioCtx = (window.AudioContext || (window as any).webkitAudioContext) as any;
-      const audioCtx: AudioContext = new AudioCtx();
-      audioCtxRef.current = audioCtx;
-      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      // ── 7. Audio graph: microphone → analyser (visualisation) ─────────
       const src = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.85;
       analyserRef.current = analyser;
-      src.connect(analyser);
+      src.connect(analyser); // analyser not connected to destination → no loopback
 
-      // Waveform animation
+      // Waveform animation loop
       const time = new Uint8Array(analyser.fftSize);
       const loop = () => {
         const a = analyserRef.current;
@@ -274,21 +297,43 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(loop);
 
+      // ── 8. Wait for Deepgram connection ───────────────────────────────
       await ready;
 
-      // Stream audio to Deepgram via MediaRecorder (100ms timeslices).
-      // This replaces the deprecated ScriptProcessorNode approach — the browser
-      // handles encoding natively; each chunk is sent directly over Socket.IO.
-      recorder.ondataavailable = (e) => {
+      // ── 9. Wire up real-time streaming ───────────────────────────────
+      if (useWorklet) {
+        // ── AudioWorklet path (preferred) ─────────────────────────────
+        // Runs off the main thread; posts 100 ms PCM16 chunks.
+        // Deepgram gets raw linear16 with zero container overhead → partials
+        // fire within ~200 ms of speech.
+        const workletNode = new AudioWorkletNode(audioCtx, 'audio-processor');
+        workletNode.port.onmessage = (evt: MessageEvent) => {
+          if (pausedRef.current) return;
+          const socket = socketRef.current;
+          if (socket?.connected) {
+            socket.emit('audio', new Uint8Array(evt.data as ArrayBuffer));
+          }
+        };
+        // microphone → worklet (NOT connected to destination → no echo)
+        src.connect(workletNode);
+      }
+
+      // MediaRecorder collects the complete audio for S3 upload.
+      // In the fallback path it also streams WebM/Opus to Deepgram.
+      recorder.ondataavailable = (e: BlobEvent) => {
         if (!e.data?.size) return;
-        chunksRef.current.push(e.data); // collect for S3 upload
-        if (pausedRef.current) return;  // don't stream while paused
-        e.data.arrayBuffer().then((buf) => {
-          if (!pausedRef.current) socketRef.current?.emit('audio', new Uint8Array(buf));
-        });
+        chunksRef.current.push(e.data); // always accumulate for S3
+        if (!useWorklet && !pausedRef.current) {
+          // Fallback: stream WebM chunks directly
+          e.data.arrayBuffer().then((buf) => {
+            if (!pausedRef.current) socketRef.current?.emit('audio', new Uint8Array(buf));
+          });
+        }
       };
       recorder.onstop = () => stream.getTracks().forEach(t => t.stop());
-      recorder.start(100); // 100ms chunks → ~10 packets/sec to Deepgram
+      // Worklet path: coarser slices fine (only for S3).
+      // Fallback path: 100 ms slices needed for streaming responsiveness.
+      recorder.start(useWorklet ? 500 : 100);
       mediaRecorderRef.current = recorder;
       setState('recording');
 
