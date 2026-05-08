@@ -207,7 +207,8 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       // This lets us tell the gateway the correct mimetype up-front.
       let useWorklet = false;
       try {
-        await audioCtx.audioWorklet.addModule('/audio-processor.js');
+        // Cache-bust the worklet module so browsers always load the latest version.
+        await audioCtx.audioWorklet.addModule('/audio-processor.js?v=5');
         useWorklet = true;
       } catch {
         console.warn('[DocEdge] AudioWorklet unavailable — will fall back to MediaRecorder streaming');
