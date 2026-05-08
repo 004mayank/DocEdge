@@ -1,72 +1,40 @@
 /**
  * AudioWorklet processor — real-time audio thread.
  *
- * Downsamples from whatever rate the AudioContext was created at (typically
- * 44 100 Hz or 48 000 Hz on macOS/Windows) down to 16 000 Hz using linear
- * interpolation, converts to signed 16-bit PCM, and posts 100 ms batches to
- * the main thread.
+ * Converts Float32 PCM (at whatever rate the AudioContext was created with —
+ * typically 44 100 Hz or 48 000 Hz on macOS/Windows) to signed 16-bit integers
+ * and posts 100 ms batches to the main thread.
  *
- * Deepgram receives clean 16 kHz linear16 audio with no container overhead.
+ * NO downsampling: we send at the native rate and tell Deepgram the actual
+ * sample_rate.  This avoids resampling artefacts that degraded recognition.
  *
- * The global `sampleRate` variable is injected by the AudioWorklet runtime
- * and always reflects the true AudioContext sample rate.
+ * `sampleRate` is a global constant injected by the AudioWorklet runtime.
  */
 
-const TARGET_RATE = 16000;
-const TARGET_CHUNK_SAMPLES = 1600; // 100 ms worth at 16 kHz
+// 100 ms worth of samples at the native context rate.
+const CHUNK_SAMPLES = Math.round(sampleRate * 0.1);
 
 class AudioProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    // Ratio: how many input samples correspond to one output sample.
-    // e.g. 48000 / 16000 = 3.0  |  44100 / 16000 = 2.75625
-    this._ratio = sampleRate / TARGET_RATE;
-
-    // Ring buffer for incoming float32 samples (before downsampling).
-    this._inBuf  = new Float32Array(8192);
-    this._inHead = 0;   // write pointer
-    this._inTail = 0;   // read pointer (fractional)
-
-    // Output buffer for resampled int16 samples.
-    this._outBuf  = new Int16Array(TARGET_CHUNK_SAMPLES);
-    this._outHead = 0;
-  }
-
-  /** Read a float sample at a fractional position with linear interpolation. */
-  _readAt(pos) {
-    const i = pos | 0;
-    const f = pos - i;
-    const a = this._inBuf[i % this._inBuf.length];
-    const b = this._inBuf[(i + 1) % this._inBuf.length];
-    return a + (b - a) * f;
+    this._buf    = new Int16Array(CHUNK_SAMPLES);
+    this._offset = 0;
   }
 
   process(inputs) {
     const channel = inputs && inputs[0] && inputs[0][0];
     if (!channel) return true;
 
-    // Write incoming samples into the ring buffer.
     for (let i = 0; i < channel.length; i++) {
-      this._inBuf[this._inHead % this._inBuf.length] = channel[i];
-      this._inHead++;
-    }
+      const s = channel[i] < -1 ? -1 : channel[i] > 1 ? 1 : channel[i];
+      // Float32 → Int16 (little-endian)
+      this._buf[this._offset++] = s < 0 ? (s * 0x8000) | 0 : (s * 0x7FFF) | 0;
 
-    // Drain resampled output while there are enough input samples.
-    const available = this._inHead - this._inTail;
-    while (this._inTail + this._ratio <= this._inHead) {
-      const sample = this._readAt(this._inTail % this._inBuf.length);
-      this._inTail += this._ratio;
-
-      // Float32 → Int16
-      const s = sample < -1 ? -1 : sample > 1 ? 1 : sample;
-      this._outBuf[this._outHead++] = s < 0 ? (s * 0x8000) | 0 : (s * 0x7FFF) | 0;
-
-      if (this._outHead >= TARGET_CHUNK_SAMPLES) {
-        // Transfer buffer ownership to avoid copying.
-        const transfer = this._outBuf.buffer;
-        this.port.postMessage(transfer, [transfer]);
-        this._outBuf  = new Int16Array(TARGET_CHUNK_SAMPLES);
-        this._outHead = 0;
+      if (this._offset >= CHUNK_SAMPLES) {
+        // Transfer ownership — zero-copy send to the main thread.
+        this.port.postMessage(this._buf.buffer, [this._buf.buffer]);
+        this._buf    = new Int16Array(CHUNK_SAMPLES);
+        this._offset = 0;
       }
     }
 

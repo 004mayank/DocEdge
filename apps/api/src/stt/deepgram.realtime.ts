@@ -4,6 +4,8 @@ import WebSocket from 'ws';
 export type DeepgramRealtimeOptions = {
   language?: string;
   mimetype: string;
+  /** Actual AudioContext sample rate — required for raw PCM16 streams. */
+  sampleRate?: number;
 };
 
 export type DeepgramRealtimeTranscriptEvent = {
@@ -48,15 +50,17 @@ export class DeepgramRealtimeClient {
     // 100 ms was too aggressive and split single sentences into many micro-segments.
     url.searchParams.set('endpointing', '500');
 
-    // Raw PCM-16 path (AudioWorklet): must declare encoding explicitly.
-    // WebM/Opus path: Deepgram auto-detects from container headers.
+    // Raw PCM-16 path (AudioWorklet): must declare encoding + sample_rate explicitly.
+    // Use the actual AudioContext rate passed from the browser (44100 or 48000 Hz).
+    // WebM/Opus path: Deepgram auto-detects from container headers — no params needed.
     const isPCM =
       this.opts.mimetype?.includes('l16') ||
       this.opts.mimetype?.includes('pcm') ||
       this.opts.mimetype === 'audio/raw';
     if (isPCM) {
       url.searchParams.set('encoding', 'linear16');
-      url.searchParams.set('sample_rate', '16000');
+      // Default to 48000 if the browser didn't send the rate; Deepgram handles both common rates.
+      url.searchParams.set('sample_rate', String(this.opts.sampleRate ?? 48000));
       url.searchParams.set('channels', '1');
     }
 

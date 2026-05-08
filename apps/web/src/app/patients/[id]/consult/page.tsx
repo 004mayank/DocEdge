@@ -242,7 +242,10 @@ export default function ConsultPage({ params }: { params: { id: string } }) {
       });
 
       sock.on('connect', () => {
-        sock.emit('start', { mimetype: streamMimetype, language: inputLanguage });
+        // Pass the actual AudioContext sample rate so Deepgram knows exactly
+        // what rate the PCM16 audio is at — no downsampling, no drift.
+        const ctxRate = useWorklet ? Math.round(audioCtx.sampleRate) : undefined;
+        sock.emit('start', { mimetype: streamMimetype, sampleRate: ctxRate, language: inputLanguage });
       });
       sock.on('connect_error', (e: any) => setMessage(`Connect error: ${e?.message ?? e}`));
 

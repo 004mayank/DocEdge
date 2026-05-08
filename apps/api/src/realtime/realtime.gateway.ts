@@ -46,14 +46,15 @@ export class RealtimeGateway {
   async start(
     @ConnectedSocket() socket: Socket,
     @MessageBody()
-    body: { mimetype: string; language?: 'en' | 'hi' | 'hi-en' },
+    body: { mimetype: string; language?: 'en' | 'hi' | 'hi-en'; sampleRate?: number },
   ) {
     const mimetype = body?.mimetype ?? 'audio/webm;codecs=opus';
     const language = body?.language;
+    const sampleRate = body?.sampleRate;
 
-    this.logger.log(`start socket=${socket.id} mimetype=${mimetype} lang=${language ?? ''}`);
+    this.logger.log(`start socket=${socket.id} mimetype=${mimetype} sampleRate=${sampleRate ?? 'auto'} lang=${language ?? ''}`);
 
-    const dg = new DeepgramRealtimeClient({ mimetype, language });
+    const dg = new DeepgramRealtimeClient({ mimetype, language, sampleRate });
     // Store session immediately so audio events can buffer chunks while we connect.
     // DO NOT emit 'ready' yet — the client must not send audio until DG is connected.
     this.sessions.set(socket.id, { chunks: [], mimetype, language, dg });
